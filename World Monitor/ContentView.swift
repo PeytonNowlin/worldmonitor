@@ -21,6 +21,46 @@ final class DashboardViewModel: ObservableObject {
     @Published var headlinesFailed = false
     @Published var naturalEventsFailed = false
     @Published var militaryOverviewFailed = false
+    @Published var gdeltFailed = false
+    @Published var ucdpFailed = false
+    @Published var cyberIntelFailed = false
+    @Published var marketDataFailed = false
+    @Published var travelSafetyFailed = false
+
+    // MARK: - Conflict & Security Data
+    @Published var gdeltEvents: [GDELTEvent] = []
+    @Published var ucdpConflicts: [UCDPConflictEvent] = []
+
+    // MARK: - Military Data
+    @Published var gpsJammingCells: [GPSJamHexCell] = []
+    @Published var militaryBases: [MilitaryBase] = []
+
+    // MARK: - Cyber Threat Data
+    @Published var c2Servers: [FeodoC2Server] = []
+    @Published var maliciousURLs: [URLhausEntry] = []
+    @Published var c2IntelIndicators: [C2IntelIOC] = []
+
+    // MARK: - Market Data
+    @Published var marketIndices: [YahooQuote] = []
+    @Published var cryptoAssets: [CryptoAsset] = []
+    @Published var stablecoinHealth: [StablecoinHealth] = []
+    @Published var fearGreed: FearGreedIndex?
+    @Published var bitcoinHashrate: BitcoinHashrate?
+    @Published var policyRates: [BISPolicyRate] = []
+
+    // MARK: - Infrastructure Data
+    @Published var internetConnectivity: [CloudflareRadarData] = []
+    @Published var displacementData: [DisplacementData] = []
+
+    // MARK: - Travel & Safety Data
+    @Published var travelAdvisories: [TravelAdvisory] = []
+    @Published var airportDelays: [AirportDelay] = []
+
+    // MARK: - New Layer Visibility
+    @Published var showCyberThreats: Bool = false
+    @Published var showGPSJamming: Bool = false
+    @Published var showMilitaryBases: Bool = false
+    @Published var showConflictEvents: Bool = false
 
     // Visible map region for viewport culling
     @Published var visibleMapRegion: MKCoordinateRegion = MKCoordinateRegion(
@@ -61,6 +101,34 @@ final class DashboardViewModel: ObservableObject {
         return visible.sorted { $0.severity > $1.severity }.prefix(maxVisibleEvents).map { $0 }
     }
 
+    var visibleGPSJamCells: [GPSJamHexCell] {
+        guard !gpsJammingCells.isEmpty else { return [] }
+        return gpsJammingCells.filter { cell in
+            visibleMapRegion.contains(cell.coordinate) && cell.interferenceLevel != .low
+        }
+    }
+
+    var visibleMilitaryBases: [MilitaryBase] {
+        guard !militaryBases.isEmpty else { return [] }
+        return militaryBases.filter { base in
+            visibleMapRegion.contains(base.coordinate)
+        }
+    }
+
+    var visibleGDELTEvents: [GDELTEvent] {
+        guard !gdeltEvents.isEmpty else { return [] }
+        return gdeltEvents.filter { event in
+            visibleMapRegion.contains(event.coordinate) && event.severity >= 3
+        }
+    }
+
+    var visibleC2Servers: [FeodoC2Server] {
+        guard !c2Servers.isEmpty else { return [] }
+        // Filter to high/critical severity servers for map display
+        // (exact coordinates not available, will display at country center)
+        return c2Servers.filter { $0.severity >= .high }.prefix(50).map { $0 }
+    }
+
     private let service: WorldMonitorService
     private var tickerTask: Task<Void, Never>?
 
@@ -94,14 +162,39 @@ final class DashboardViewModel: ObservableObject {
         headlinesFailed = false
         naturalEventsFailed = false
         militaryOverviewFailed = false
+        gdeltFailed = false
+        ucdpFailed = false
+        cyberIntelFailed = false
+        marketDataFailed = false
+        travelSafetyFailed = false
         defer { isRefreshing = false }
 
         let query = FeedQuery(variant: selectedVariant, region: selectedRegion, window: selectedWindow)
+
         async let snapshotTask = try? service.snapshot(for: query)
         async let feedTask = try? service.headlines(for: query)
         async let eventsTask = try? service.naturalEvents(for: query)
         async let militaryTask = try? service.militaryOverview(for: query)
 
+        async let gdeltTask = try? service.gdeltEvents(for: query)
+        async let ucdpTask = try? service.ucdpConflicts(for: query)
+
+        async let gpsJamTask = try? service.gpsJammingData(region: nil)
+        async let basesTask = service.militaryBases(for: selectedRegion)
+
+        async let c2Task = try? service.c2Servers()
+        async let urlhausTask = try? service.maliciousURLs()
+        async let c2IntelTask = try? service.c2Intel()
+
+        async let indicesTask = try? service.marketQuotes(indices: [.sp500, .nasdaq, .vix])
+        async let cryptoTask = try? service.cryptoAssets(coins: [.bitcoin, .ethereum, .solana])
+        async let fearGreedTask = try? service.fearGreedIndex()
+
+        async let connectivityTask = try? service.internetConnectivity()
+        async let displacementTask = try? service.displacementData()
+
+        async let advisoriesTask = try? service.travelAdvisories()
+        async let airportsTask = try? service.airportDelays()
         let fetchedSnapshot = await snapshotTask
         let fetchedFeed = await feedTask
         let fetchedEvents = await eventsTask
@@ -113,7 +206,7 @@ final class DashboardViewModel: ObservableObject {
         naturalEventsFailed = fetchedEvents == nil
         militaryOverviewFailed = fetchedMilitary == nil
 
-        // Set hasError if ANY source fails (partial or total failure)
+        // Set hasError if ANY core source fails
         hasError = snapshotFailed || headlinesFailed || naturalEventsFailed || militaryOverviewFailed
 
         if let fetchedSnapshot {
@@ -129,7 +222,46 @@ final class DashboardViewModel: ObservableObject {
             self.militaryOverview = fetchedMilitary
         }
 
-        // Only clear data on total failure (all sources failed)
+        // Assign new data sources (non-core, don't trigger error state)
+        let fetchedGDELT = await gdeltTask
+        let fetchedUCDP = await ucdpTask
+        let fetchedGPSJam = await gpsJamTask
+        let fetchedBases = await basesTask
+        let fetchedC2 = await c2Task
+        let fetchedURLhaus = await urlhausTask
+        let fetchedC2Intel = await c2IntelTask
+        let fetchedIndices = await indicesTask
+        let fetchedCrypto = await cryptoTask
+        let fetchedFearGreed = await fearGreedTask
+        let fetchedConnectivity = await connectivityTask
+        let fetchedDisplacement = await displacementTask
+        let fetchedAdvisories = await advisoriesTask
+        let fetchedAirports = await airportsTask
+
+        // Track new data source failures
+        gdeltFailed = fetchedGDELT == nil
+        ucdpFailed = fetchedUCDP == nil
+        cyberIntelFailed = fetchedC2 == nil || fetchedURLhaus == nil || fetchedC2Intel == nil
+        marketDataFailed = fetchedIndices == nil || fetchedCrypto == nil
+        travelSafetyFailed = fetchedAdvisories == nil || fetchedAirports == nil
+
+        // Assign new data
+        if let fetchedGDELT { self.gdeltEvents = fetchedGDELT }
+        if let fetchedUCDP { self.ucdpConflicts = fetchedUCDP }
+        if let fetchedGPSJam { self.gpsJammingCells = fetchedGPSJam }
+        self.militaryBases = fetchedBases
+        if let fetchedC2 { self.c2Servers = fetchedC2 }
+        if let fetchedURLhaus { self.maliciousURLs = fetchedURLhaus }
+        if let fetchedC2Intel { self.c2IntelIndicators = fetchedC2Intel }
+        if let fetchedIndices { self.marketIndices = fetchedIndices }
+        if let fetchedCrypto { self.cryptoAssets = fetchedCrypto }
+        self.fearGreed = fetchedFearGreed
+        if let fetchedConnectivity { self.internetConnectivity = fetchedConnectivity }
+        if let fetchedDisplacement { self.displacementData = fetchedDisplacement }
+        if let fetchedAdvisories { self.travelAdvisories = fetchedAdvisories }
+        if let fetchedAirports { self.airportDelays = fetchedAirports }
+
+        // Only clear data on total failure (all core sources failed)
         if snapshotFailed && headlinesFailed && naturalEventsFailed && militaryOverviewFailed {
             snapshot = .empty
             headlines = []
@@ -346,6 +478,52 @@ struct ContentView: View {
                             }
                         }
                     }
+                    // GPS Jamming Layer
+                    if viewModel.showGPSJamming {
+                        ForEach(viewModel.visibleGPSJamCells) { cell in
+                            Annotation("GPS Jam", coordinate: cell.coordinate) {
+                                Circle()
+                                    .fill(gpsJamColor(for: cell))
+                                    .frame(width: gpsJamSize(for: cell), height: gpsJamSize(for: cell))
+                                    .opacity(0.6)
+                            }
+                        }
+                    }
+                    // Military Bases Layer
+                    if viewModel.showMilitaryBases {
+                        ForEach(viewModel.visibleMilitaryBases) { base in
+                            Annotation(base.name, coordinate: base.coordinate) {
+                                Image(systemName: base.type.icon)
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.purple)
+                                    .background(.white.opacity(0.8), in: Circle())
+                            }
+                        }
+                    }
+                    // Conflict Events Layer
+                    if viewModel.showConflictEvents {
+                        ForEach(viewModel.visibleGDELTEvents) { event in
+                            Annotation(event.title, coordinate: event.coordinate) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.red)
+                                    .background(.white.opacity(0.8), in: Circle())
+                            }
+                        }
+                    }
+                    // Cyber Threats Layer
+                    if viewModel.showCyberThreats {
+                        ForEach(viewModel.visibleC2Servers) { server in
+                            if let coordinate = countryCoordinate(for: server.countryCode) {
+                                Annotation(server.ipAddress, coordinate: coordinate) {
+                                    Image(systemName: "server.rack")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(c2ServerColor(for: server))
+                                        .background(.white.opacity(0.8), in: Circle())
+                                }
+                            }
+                        }
+                    }
                 }
                 .onMapCameraChange { context in
                     viewModel.visibleMapRegion = context.region
@@ -357,7 +535,7 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
-                    Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels")
+                    Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels | \(viewModel.visibleGPSJamCells.count) jamming | \(viewModel.visibleMilitaryBases.count) bases | \(viewModel.visibleGDELTEvents.count) conflicts | \(viewModel.visibleC2Servers.count) C2s")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
                 }
@@ -384,6 +562,68 @@ struct ContentView: View {
                         .background(Color(.secondarySystemBackground), in: Capsule())
                     }
                 }
+
+                // New layer toggles
+                Button {
+                    viewModel.showGPSJamming.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text("GPS Jamming")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+
+                Button {
+                    viewModel.showMilitaryBases.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(viewModel.showMilitaryBases ? .purple : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text("Bases")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+
+                Button {
+                    viewModel.showConflictEvents.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(viewModel.showConflictEvents ? .red : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text("Conflicts")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+
+                // Cyber Threats Toggle
+                Button {
+                    viewModel.showCyberThreats.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(viewModel.showCyberThreats ? .red : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text("Cyber")
+                            .font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
             }
 
             HStack {
@@ -399,30 +639,27 @@ struct ContentView: View {
 
     private var sidePanelColumn: some View {
         VStack(spacing: 10) {
-            DashboardCardView(
-                title: "Strategic Risk",
-                value: "\(viewModel.snapshot.riskScore) / 100",
-                trend: viewModel.snapshot.trend,
-                color: viewModel.snapshot.riskScore > 70 ? .orange : .green
-            )
-            DashboardCardView(
-                title: "Country Instability Index",
-                value: "\(viewModel.snapshot.activeAlerts) Active Alerts",
-                trend: "\(viewModel.snapshot.newAlerts) new in \(viewModel.selectedWindow.title)",
-                color: .red
-            )
-            DashboardCardView(
-                title: "Infrastructure Cascade",
-                value: "\(viewModel.snapshot.chokepoints) Chokepoints",
-                trend: "\(viewModel.militaryOverview.basesInView) bases in view",
-                color: .yellow
-            )
-            DashboardCardView(
-                title: "Macro Radar",
-                value: viewModel.snapshot.macroBias,
-                trend: "Last window: \(viewModel.selectedWindow.title)",
-                color: .blue
-            )
+            // Original cards (compact)
+            HStack(spacing: 8) {
+                CompactDashboardCard(
+                    title: "Risk",
+                    value: "\(viewModel.snapshot.riskScore)",
+                    trend: viewModel.snapshot.trend,
+                    color: viewModel.snapshot.riskScore > 70 ? .orange : .green
+                )
+                CompactDashboardCard(
+                    title: "Alerts",
+                    value: "\(viewModel.snapshot.activeAlerts)",
+                    trend: "+\(viewModel.snapshot.newAlerts)",
+                    color: .red
+                )
+            }
+
+            // New panels
+            marketDataPanel
+            conflictSecurityPanel
+            cyberThreatPanel
+            travelSafetyPanel
         }
     }
 
@@ -484,6 +721,271 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    // MARK: - New Dashboard Panels
+
+    private var marketDataPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Market Intelligence")
+                    .font(.headline)
+                Spacer()
+                if let fearGreed = viewModel.fearGreed {
+                    Label(fearGreed.classification.rawValue, systemImage: "gauge.with.dots.needle")
+                        .font(.caption)
+                        .foregroundStyle(fearGreedColor(fearGreed.classification))
+                }
+            }
+
+            // Market Indices
+            HStack(spacing: 12) {
+                ForEach(viewModel.marketIndices.prefix(3)) { quote in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(quote.symbol)
+                            .font(.caption2.weight(.semibold))
+                        Text(String(format: "%.2f", quote.price))
+                            .font(.subheadline.monospaced())
+                        Text(String(format: "%+.2f%%", quote.changePercent))
+                            .font(.caption2)
+                            .foregroundStyle(quote.isPositive ? .green : .red)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            Divider()
+
+            // Crypto Assets
+            HStack(spacing: 12) {
+                ForEach(viewModel.cryptoAssets.prefix(3)) { asset in
+                    HStack(spacing: 4) {
+                        Text(asset.symbol.uppercased())
+                            .font(.caption2.weight(.semibold))
+                        Text(String(format: "%.2f", asset.currentPrice))
+                            .font(.caption.monospaced())
+                        Text(String(format: "%+.1f%%", asset.priceChangePercentage24h))
+                            .font(.caption2)
+                            .foregroundStyle(asset.isPositive ? .green : .red)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var conflictSecurityPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Conflict Monitor")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.ucdpConflicts.count) active")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // UCDP War Zones
+            if !viewModel.ucdpConflicts.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(viewModel.ucdpConflicts.prefix(3)) { conflict in
+                        HStack {
+                            Circle()
+                                .fill(conflict.severity >= 4 ? .red : .orange)
+                                .frame(width: 8, height: 8)
+                            Text(conflict.conflictName)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(conflict.deaths) deaths")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            // GDELT Recent Events
+            if !viewModel.gdeltEvents.isEmpty {
+                Text("Recent Activity")
+                    .font(.caption.weight(.semibold))
+                ForEach(viewModel.gdeltEvents.prefix(2)) { event in
+                    HStack {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(event.severity >= 4 ? .red : .orange)
+                        Text(event.title)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(event.numMentions) mentions")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var cyberThreatPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Cyber Threat Intel")
+                    .font(.headline)
+                Spacer()
+                Text("\(viewModel.c2Servers.count) C2s")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // C2 Server Summary
+            HStack(spacing: 16) {
+                ThreatStatBadge(
+                    icon: "server.rack",
+                    count: viewModel.c2Servers.count,
+                    label: "C2 Servers",
+                    color: .red
+                )
+                ThreatStatBadge(
+                    icon: "link.badge.plus",
+                    count: viewModel.maliciousURLs.count,
+                    label: "Malicious URLs",
+                    color: .orange
+                )
+            }
+
+            Divider()
+
+            // Top Malware Families
+            if !viewModel.c2Servers.isEmpty {
+                let families = Dictionary(grouping: viewModel.c2Servers) { $0.malwareFamily }
+                    .mapValues { $0.count }
+                    .sorted { $0.value > $1.value }
+                    .prefix(3)
+
+                ForEach(Array(families), id: \.key) { family, count in
+                    HStack {
+                        Circle()
+                            .fill(.red.opacity(0.7))
+                            .frame(width: 6, height: 6)
+                        Text(family)
+                            .font(.caption)
+                        Spacer()
+                        Text("\(count) servers")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var travelSafetyPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Travel & Safety")
+                    .font(.headline)
+                Spacer()
+                let highRisk = viewModel.travelAdvisories.filter { $0.advisoryLevel.isRisky }.count
+                if highRisk > 0 {
+                    Label("\(highRisk) High Risk", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            // Airport Status
+            let delays = viewModel.airportDelays.filter { $0.hasSignificantDelay }
+            if !delays.isEmpty {
+                HStack {
+                    Image(systemName: "airplane")
+                        .font(.caption)
+                    Text("\(delays.count) airports with delays")
+                        .font(.caption)
+                    Spacer()
+                }
+                .foregroundStyle(.orange)
+            }
+
+            Divider()
+
+            // Do Not Travel Countries
+            let doNotTravel = viewModel.travelAdvisories.filter { $0.advisoryLevel == .level4 }
+            if !doNotTravel.isEmpty {
+                Text("Do Not Travel: \(doNotTravel.prefix(3).map { $0.countryCode }.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: - Helper Views
+
+    struct ThreatStatBadge: View {
+        let icon: String
+        let count: Int
+        let label: String
+        let color: Color
+
+        var body: some View {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(color)
+                Text("\(count)")
+                    .font(.headline)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    struct CompactDashboardCard: View {
+        let title: String
+        let value: String
+        let trend: String
+        let color: Color
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.headline)
+                Text(trend)
+                    .font(.caption2)
+                    .foregroundStyle(color)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    // MARK: - Helper Functions
+
+    private func fearGreedColor(_ classification: FearGreedClassification) -> Color {
+        switch classification {
+        case .extremeFear: return .red
+        case .fear: return .orange
+        case .neutral: return .gray
+        case .greed: return .green
+        case .extremeGreed: return .green
+        }
+    }
+
     private func color(for event: NaturalEvent) -> Color {
         switch event.severity {
         case 5:
@@ -508,6 +1010,125 @@ struct ContentView: View {
         default:
             return 9
         }
+    }
+
+    // MARK: - GPS Jamming Helpers
+    private func gpsJamColor(for cell: GPSJamHexCell) -> Color {
+        switch cell.interferenceLevel {
+        case .high:
+            return .red
+        case .medium:
+            return .orange
+        case .low:
+            return .clear
+        }
+    }
+
+    private func gpsJamSize(for cell: GPSJamHexCell) -> CGFloat {
+        // Scale by interference percentage (20-40pt range)
+        return 20 + CGFloat(cell.interferencePercent / 5)
+    }
+
+    // MARK: - C2 Server Helpers
+    private func c2ServerColor(for server: FeodoC2Server) -> Color {
+        switch server.severity {
+        case .critical:
+            return .red
+        case .high:
+            return .orange
+        case .medium:
+            return .yellow
+        case .low:
+            return .green
+        }
+    }
+
+    private func countryCoordinate(for countryCode: String?) -> CLLocationCoordinate2D? {
+        guard let code = countryCode?.uppercased() else { return nil }
+        // Approximate country centers for major countries with C2 activity
+        let coordinates: [String: CLLocationCoordinate2D] = [
+            "US": CLLocationCoordinate2D(latitude: 39.8283, longitude: -98.5795),
+            "CN": CLLocationCoordinate2D(latitude: 35.8617, longitude: 104.1954),
+            "RU": CLLocationCoordinate2D(latitude: 61.5240, longitude: 105.3188),
+            "DE": CLLocationCoordinate2D(latitude: 51.1657, longitude: 10.4515),
+            "NL": CLLocationCoordinate2D(latitude: 52.1326, longitude: 5.2913),
+            "GB": CLLocationCoordinate2D(latitude: 55.3781, longitude: -3.4360),
+            "FR": CLLocationCoordinate2D(latitude: 46.2276, longitude: 2.2137),
+            "BR": CLLocationCoordinate2D(latitude: -14.2350, longitude: -51.9253),
+            "IN": CLLocationCoordinate2D(latitude: 20.5937, longitude: 78.9629),
+            "JP": CLLocationCoordinate2D(latitude: 36.2048, longitude: 138.2529),
+            "CA": CLLocationCoordinate2D(latitude: 56.1304, longitude: -106.3468),
+            "AU": CLLocationCoordinate2D(latitude: -25.2744, longitude: 133.7751),
+            "KR": CLLocationCoordinate2D(latitude: 35.9078, longitude: 127.7669),
+            "IT": CLLocationCoordinate2D(latitude: 41.8719, longitude: 12.5674),
+            "SG": CLLocationCoordinate2D(latitude: 1.3521, longitude: 103.8198),
+            "HK": CLLocationCoordinate2D(latitude: 22.3193, longitude: 114.1694),
+            "UA": CLLocationCoordinate2D(latitude: 48.3794, longitude: 31.1656),
+            "RO": CLLocationCoordinate2D(latitude: 45.9432, longitude: 24.9668),
+            "PL": CLLocationCoordinate2D(latitude: 51.9194, longitude: 19.1451),
+            "CZ": CLLocationCoordinate2D(latitude: 49.8175, longitude: 15.4730),
+            "BG": CLLocationCoordinate2D(latitude: 42.7339, longitude: 25.4858),
+            "HU": CLLocationCoordinate2D(latitude: 47.1625, longitude: 19.5033),
+            "AT": CLLocationCoordinate2D(latitude: 47.5162, longitude: 14.5501),
+            "CH": CLLocationCoordinate2D(latitude: 46.8182, longitude: 8.2275),
+            "SE": CLLocationCoordinate2D(latitude: 60.1282, longitude: 18.6435),
+            "NO": CLLocationCoordinate2D(latitude: 60.4720, longitude: 8.4689),
+            "FI": CLLocationCoordinate2D(latitude: 61.9241, longitude: 25.7482),
+            "DK": CLLocationCoordinate2D(latitude: 56.2639, longitude: 9.5018),
+            "ES": CLLocationCoordinate2D(latitude: 40.4637, longitude: -3.7492),
+            "PT": CLLocationCoordinate2D(latitude: 39.3999, longitude: -8.2245),
+            "BE": CLLocationCoordinate2D(latitude: 50.5039, longitude: 4.4699),
+            "IE": CLLocationCoordinate2D(latitude: 53.1424, longitude: -7.6921),
+            "TR": CLLocationCoordinate2D(latitude: 38.9637, longitude: 35.2433),
+            "IL": CLLocationCoordinate2D(latitude: 31.0461, longitude: 34.8516),
+            "SA": CLLocationCoordinate2D(latitude: 23.8859, longitude: 45.0792),
+            "AE": CLLocationCoordinate2D(latitude: 23.4241, longitude: 53.8478),
+            "ZA": CLLocationCoordinate2D(latitude: -30.5595, longitude: 22.9375),
+            "NG": CLLocationCoordinate2D(latitude: 9.0820, longitude: 8.6753),
+            "EG": CLLocationCoordinate2D(latitude: 26.0975, longitude: 30.8178),
+            "ID": CLLocationCoordinate2D(latitude: -0.7893, longitude: 113.9213),
+            "TH": CLLocationCoordinate2D(latitude: 15.8700, longitude: 100.9925),
+            "VN": CLLocationCoordinate2D(latitude: 14.0583, longitude: 108.2772),
+            "MY": CLLocationCoordinate2D(latitude: 4.2105, longitude: 101.9758),
+            "PH": CLLocationCoordinate2D(latitude: 12.8797, longitude: 121.7740),
+            "MX": CLLocationCoordinate2D(latitude: 23.6345, longitude: -102.5528),
+            "AR": CLLocationCoordinate2D(latitude: -38.4161, longitude: -63.6167),
+            "CL": CLLocationCoordinate2D(latitude: -35.6751, longitude: -71.5430),
+            "CO": CLLocationCoordinate2D(latitude: 4.5709, longitude: -74.2973),
+            "PE": CLLocationCoordinate2D(latitude: -9.1900, longitude: -75.0152),
+            "VE": CLLocationCoordinate2D(latitude: 6.4238, longitude: -66.5897),
+            "PK": CLLocationCoordinate2D(latitude: 30.3753, longitude: 69.3451),
+            "BD": CLLocationCoordinate2D(latitude: 23.6850, longitude: 90.3563),
+            "TW": CLLocationCoordinate2D(latitude: 23.6978, longitude: 120.9605),
+            "KZ": CLLocationCoordinate2D(latitude: 48.0196, longitude: 66.9237),
+            "IR": CLLocationCoordinate2D(latitude: 32.4279, longitude: 53.6880),
+            "IQ": CLLocationCoordinate2D(latitude: 33.2232, longitude: 43.6793),
+            "SY": CLLocationCoordinate2D(latitude: 34.8021, longitude: 38.9968),
+            "AF": CLLocationCoordinate2D(latitude: 33.9391, longitude: 67.7100),
+            "MM": CLLocationCoordinate2D(latitude: 21.9139, longitude: 95.9560),
+            "KP": CLLocationCoordinate2D(latitude: 40.3399, longitude: 127.5101),
+            "BY": CLLocationCoordinate2D(latitude: 53.7098, longitude: 27.9534),
+            "MD": CLLocationCoordinate2D(latitude: 47.4116, longitude: 28.3699),
+            "GE": CLLocationCoordinate2D(latitude: 42.3154, longitude: 43.3569),
+            "AM": CLLocationCoordinate2D(latitude: 40.0691, longitude: 45.0382),
+            "AZ": CLLocationCoordinate2D(latitude: 40.1431, longitude: 47.5769),
+            "LT": CLLocationCoordinate2D(latitude: 55.1694, longitude: 23.8813),
+            "LV": CLLocationCoordinate2D(latitude: 56.8796, longitude: 24.6032),
+            "EE": CLLocationCoordinate2D(latitude: 58.5953, longitude: 25.0136),
+            "SK": CLLocationCoordinate2D(latitude: 48.6690, longitude: 19.6990),
+            "SI": CLLocationCoordinate2D(latitude: 46.1512, longitude: 14.9955),
+            "HR": CLLocationCoordinate2D(latitude: 45.1000, longitude: 15.2000),
+            "RS": CLLocationCoordinate2D(latitude: 44.0165, longitude: 21.0059),
+            "BA": CLLocationCoordinate2D(latitude: 43.9159, longitude: 17.6791),
+            "MK": CLLocationCoordinate2D(latitude: 41.6086, longitude: 21.7453),
+            "AL": CLLocationCoordinate2D(latitude: 41.1533, longitude: 20.1683),
+            "GR": CLLocationCoordinate2D(latitude: 39.0742, longitude: 21.8243),
+            "CY": CLLocationCoordinate2D(latitude: 35.1264, longitude: 33.4299),
+            "MT": CLLocationCoordinate2D(latitude: 35.9375, longitude: 14.3754),
+            "IS": CLLocationCoordinate2D(latitude: 64.9631, longitude: -19.0208),
+            "NZ": CLLocationCoordinate2D(latitude: -40.9006, longitude: 174.8869)
+        ]
+        return coordinates[code]
     }
 
     private var liveFeedPanel: some View {
