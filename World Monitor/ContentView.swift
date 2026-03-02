@@ -16,6 +16,51 @@ final class DashboardViewModel: ObservableObject {
     @Published var hasError = false
     @Published var liveEnabled = false
 
+    // Track individual data source failures for partial error detection
+    @Published var snapshotFailed = false
+    @Published var headlinesFailed = false
+    @Published var naturalEventsFailed = false
+    @Published var militaryOverviewFailed = false
+
+    // Visible map region for viewport culling
+    @Published var visibleMapRegion: MKCoordinateRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 20, longitude: 0),
+        span: MKCoordinateSpan(latitudeDelta: 120, longitudeDelta: 120)
+    )
+
+    // Performance limits
+    private let maxVisibleFlights = 100
+    private let maxVisibleVessels = 50
+    private let maxVisibleEvents = 50
+
+    // Filtered military data based on visible region with limits
+    var visibleFlights: [MilitaryFlightSignal] {
+        guard !militaryOverview.flights.isEmpty else { return [] }
+        let visible = militaryOverview.flights.filter { flight in
+            visibleMapRegion.contains(flight.coordinate)
+        }
+        // Prioritize by altitude (higher = more significant) and limit
+        return visible.sorted { $0.altitude > $1.altitude }.prefix(maxVisibleFlights).map { $0 }
+    }
+
+    var visibleVessels: [MilitaryVesselSignal] {
+        guard !militaryOverview.vessels.isEmpty else { return [] }
+        let visible = militaryOverview.vessels.filter { vessel in
+            visibleMapRegion.contains(vessel.coordinate)
+        }
+        // Limit vessels to prevent map clutter
+        return visible.prefix(maxVisibleVessels).map { $0 }
+    }
+
+    var visibleNaturalEvents: [NaturalEvent] {
+        guard !naturalEvents.isEmpty else { return [] }
+        let visible = naturalEvents.filter { event in
+            visibleMapRegion.contains(event.coordinate)
+        }
+        // Prioritize by severity and limit
+        return visible.sorted { $0.severity > $1.severity }.prefix(maxVisibleEvents).map { $0 }
+    }
+
     private let service: WorldMonitorService
     private var tickerTask: Task<Void, Never>?
 
@@ -45,6 +90,10 @@ final class DashboardViewModel: ObservableObject {
     func refresh() async {
         isRefreshing = true
         hasError = false
+        snapshotFailed = false
+        headlinesFailed = false
+        naturalEventsFailed = false
+        militaryOverviewFailed = false
         defer { isRefreshing = false }
 
         let query = FeedQuery(variant: selectedVariant, region: selectedRegion, window: selectedWindow)
@@ -57,6 +106,15 @@ final class DashboardViewModel: ObservableObject {
         let fetchedFeed = await feedTask
         let fetchedEvents = await eventsTask
         let fetchedMilitary = await militaryTask
+
+        // Track individual failures for partial error detection
+        snapshotFailed = fetchedSnapshot == nil
+        headlinesFailed = fetchedFeed == nil
+        naturalEventsFailed = fetchedEvents == nil
+        militaryOverviewFailed = fetchedMilitary == nil
+
+        // Set hasError if ANY source fails (partial or total failure)
+        hasError = snapshotFailed || headlinesFailed || naturalEventsFailed || militaryOverviewFailed
 
         if let fetchedSnapshot {
             self.snapshot = fetchedSnapshot
@@ -71,8 +129,8 @@ final class DashboardViewModel: ObservableObject {
             self.militaryOverview = fetchedMilitary
         }
 
-        if fetchedSnapshot == nil, fetchedFeed == nil, fetchedEvents == nil, fetchedMilitary == nil {
-            hasError = true
+        // Only clear data on total failure (all sources failed)
+        if snapshotFailed && headlinesFailed && naturalEventsFailed && militaryOverviewFailed {
             snapshot = .empty
             headlines = []
             naturalEvents = []
@@ -258,7 +316,7 @@ struct ContentView: View {
 
             ZStack(alignment: .bottomLeading) {
                 Map(position: $mapCameraPosition) {
-                    ForEach(viewModel.naturalEvents) { event in
+                    ForEach(viewModel.visibleNaturalEvents) { event in
                         Annotation(event.title, coordinate: event.coordinate) {
                             Circle()
                                 .fill(color(for: event))
@@ -267,7 +325,7 @@ struct ContentView: View {
                         }
                     }
                     if viewModel.layerVisibility.isVisible(.conflictZones) {
-                        ForEach(viewModel.militaryOverview.flights) { flight in
+                        ForEach(viewModel.visibleFlights) { flight in
                             Annotation(flight.callsign, coordinate: flight.coordinate) {
                                 Image(systemName: "airplane.circle.fill")
                                     .font(.system(size: 14))
@@ -278,7 +336,7 @@ struct ContentView: View {
                         }
                     }
                     if viewModel.layerVisibility.isVisible(.maritimeTraffic) {
-                        ForEach(viewModel.militaryOverview.vessels) { vessel in
+                        ForEach(viewModel.visibleVessels) { vessel in
                             Annotation(vessel.name, coordinate: vessel.coordinate) {
                                 Image(systemName: "ferry.fill")
                                     .font(.system(size: 12))
@@ -289,6 +347,9 @@ struct ContentView: View {
                         }
                     }
                 }
+                .onMapCameraChange { context in
+                    viewModel.visibleMapRegion = context.region
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -296,7 +357,7 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
-                    Text("\(viewModel.naturalEvents.count) natural | \(viewModel.militaryOverview.flights.count) flights | \(viewModel.militaryOverview.vessels.count) vessels")
+                    Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
                 }
@@ -377,9 +438,34 @@ struct ContentView: View {
             }
 
             if viewModel.hasError {
-                Text("Live data temporarily unavailable.")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Live data partially unavailable.")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+
+                    HStack(spacing: 8) {
+                        if viewModel.snapshotFailed {
+                            Label("Snapshot", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        if viewModel.headlinesFailed {
+                            Label("Headlines", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        if viewModel.naturalEventsFailed {
+                            Label("Events", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        if viewModel.militaryOverviewFailed {
+                            Label("Military", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -449,5 +535,37 @@ struct ContentView: View {
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+// MARK: - MKCoordinateRegion Extensions
+
+extension MKCoordinateRegion {
+    func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        let north = center.latitude + span.latitudeDelta / 2
+        let south = center.latitude - span.latitudeDelta / 2
+        let east = center.longitude + span.longitudeDelta / 2
+        let west = center.longitude - span.longitudeDelta / 2
+
+        // Handle longitude wrapping around the antimeridian
+        var normalizedEast = east
+        var normalizedWest = west
+        var normalizedLon = coordinate.longitude
+
+        if east > 180 || west < -180 {
+            // Region crosses antimeridian
+            if coordinate.longitude < 0 {
+                normalizedLon = coordinate.longitude + 360
+            }
+            if east < 0 {
+                normalizedEast = east + 360
+            }
+            if west < 0 {
+                normalizedWest = west + 360
+            }
+        }
+
+        return coordinate.latitude >= south && coordinate.latitude <= north &&
+               normalizedLon >= normalizedWest && normalizedLon <= normalizedEast
     }
 }
