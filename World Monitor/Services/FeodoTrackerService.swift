@@ -128,20 +128,11 @@ actor FeodoTrackerService {
 
 // MARK: - Statistics Model
 
-struct FeodoStats: Codable {
+struct FeodoStats {
     let totalServers: Int
     let activeInLast24h: Int
     let byMalwareFamily: [String: Int]
     let byCountry: [String: Int]
     let topASNs: [(asn: String, count: Int)]
     let lastUpdated: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case totalServers
-        case activeInLast24h
-        case byMalwareFamily
-        case byCountry
-        case topASNs
-        case lastUpdated
-    }
 }

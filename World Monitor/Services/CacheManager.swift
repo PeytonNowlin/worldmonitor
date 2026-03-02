@@ -23,10 +23,7 @@ actor CacheManager {
     /// Track cache statistics
     private var stats: CacheStats = CacheStats()
     
-    private init() {
-        // Load persisted cache on initialization
-        loadPersistedCache()
-    }
+    private init() {}
     
     // MARK: - Public Methods
     
@@ -92,8 +89,9 @@ actor CacheManager {
     func clear(source: DataSource) {
         // Clear memory cache entries for this source
         let prefix = "\(source.rawValue)_"
-        memoryCache.removeAll { key, _ in
-            key.hasPrefix(prefix)
+        let memoryKeysToRemove = memoryCache.keys.filter { $0.hasPrefix(prefix) }
+        for key in memoryKeysToRemove {
+            memoryCache.removeValue(forKey: key)
         }
         
         // Clear persistence
@@ -196,8 +194,9 @@ actor CacheManager {
         }
         
         let prefix = "\(source.rawValue)_"
-        persistedCache.removeAll { key, _ in
-            key.hasPrefix(prefix) || key == source.rawValue
+        let persistedKeysToRemove = persistedCache.keys.filter { $0.hasPrefix(prefix) || $0 == source.rawValue }
+        for key in persistedKeysToRemove {
+            persistedCache.removeValue(forKey: key)
         }
         
         UserDefaults.standard.set(persistedCache, forKey: persistenceKey)
@@ -303,7 +302,7 @@ extension CacheManager {
         // Fetch fresh data
         do {
             let data = try await fetch()
-            await write(source: source, region: region, data: data)
+            write(source: source, region: region, data: data)
             return data
         } catch {
             // Try stale fallback

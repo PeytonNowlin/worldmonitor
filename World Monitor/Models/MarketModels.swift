@@ -4,7 +4,6 @@ import Foundation
 
 /// Market quote from Yahoo Finance
 struct YahooQuote: Identifiable, Codable {
-    let id: String // Symbol
     let symbol: String
     let name: String
     let price: Double
@@ -273,7 +272,6 @@ enum Stablecoin: String, CaseIterable {
 
 /// BIS (Bank for International Settlements) policy rate
 struct BISPolicyRate: Identifiable, Codable {
-    let id: String // Country code
     let countryCode: String
     let countryName: String
     let rate: Double // Current policy rate
@@ -290,7 +288,6 @@ struct BISPolicyRate: Identifiable, Codable {
 
 /// BIS Real Effective Exchange Rate
 struct BISREER: Identifiable, Codable {
-    let id: String
     let countryCode: String
     let countryName: String
     let value: Double // Index value (base = 100)

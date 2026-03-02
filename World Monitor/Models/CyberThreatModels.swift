@@ -67,7 +67,6 @@ enum ThreatSeverity: Int, Codable, Comparable {
 
 /// C2 Server from Feodo Tracker (abuse.ch)
 struct FeodoC2Server: ThreatIOC, Codable {
-    let id: String // IP address
     let ipAddress: String
     let port: Int
     let threatType: ThreatType
@@ -214,14 +213,14 @@ struct C2IntelIOC: ThreatIOC, Codable {
 // MARK: - Aggregated Threat Data
 
 /// Aggregated threat intelligence summary
-struct ThreatIntelligenceSummary: Codable {
+struct ThreatIntelligenceSummary {
     let timestamp: Date
     let totalActiveC2Servers: Int
     let totalMaliciousURLs: Int
     let byMalwareFamily: [String: Int]
     let byCountry: [String: Int]
-    let topThreats: [ThreatIOC]
-    let recentAdditions: [ThreatIOC]
+    let topThreats: [any ThreatIOC]
+    let recentAdditions: [any ThreatIOC]
 }
 
 /// Threat statistics for a specific country

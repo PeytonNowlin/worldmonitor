@@ -30,7 +30,7 @@ actor FearGreedService {
             }
             
             return FearGreedIndex(
-                value: Int(dataPoint.value) ?? 0,
+                value: dataPoint.value,
                 valueClassification: dataPoint.valueClassification,
                 timestamp: Date(timeIntervalSince1970: TimeInterval(dataPoint.timestamp) ?? 0),
                 updateTimestamp: Date()
@@ -58,8 +58,8 @@ actor FearGreedService {
             return FearGreedTrend(direction: .neutral, change: 0, description: "Insufficient data")
         }
         
-        let current = Int(history.first?.value ?? "50") ?? 50
-        let previous = Int(history.last?.value ?? "50") ?? 50
+        let current = history.first?.value ?? 50
+        let previous = history.last?.value ?? 50
         let change = current - previous
         
         let direction: FearGreedDirection

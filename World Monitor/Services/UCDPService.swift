@@ -229,7 +229,7 @@ actor UCDPService {
 
 // MARK: - Statistics Model
 
-struct UCDPStats: Codable {
+struct UCDPStats {
     let totalActiveConflicts: Int
     let warCount: Int
     let minorConflictCount: Int
@@ -237,16 +237,6 @@ struct UCDPStats: Codable {
     let totalCivilianDeaths: Int
     let topAffectedCountries: [(country: String, deaths: Int)]
     let lastUpdated: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case totalActiveConflicts
-        case warCount
-        case minorConflictCount
-        case totalDeathsThisYear
-        case totalCivilianDeaths
-        case topAffectedCountries
-        case lastUpdated
-    }
 }
 
 // MARK: - Convenience Extensions

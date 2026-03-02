@@ -16,7 +16,6 @@ struct GPSJamData: Codable {
 
 /// Individual H3 hex cell with GPS jamming data
 struct GPSJamHexCell: Identifiable, Codable {
-    let id: String // H3 cell ID
     let h3Index: String
     let aircraftCount: Int
     let aircraftWithBadGps: Int

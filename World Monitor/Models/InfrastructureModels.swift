@@ -125,7 +125,6 @@ struct DisplacementStats {
 
 /// US State Department travel advisory
 struct TravelAdvisory: Identifiable, Codable {
-    let id: String // Country code
     let countryName: String
     let countryCode: String
     let advisoryLevel: AdvisoryLevel
@@ -182,7 +181,6 @@ struct AdvisoryStats {
 
 /// FAA Airport status/delay
 struct AirportDelay: Identifiable, Codable {
-    let id: String // IATA code
     let iata: String
     let icao: String
     let name: String

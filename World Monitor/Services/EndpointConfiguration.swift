@@ -49,7 +49,7 @@ enum EndpointConfigurations {
         EndpointConfiguration(
             baseURL: URL(string: "https://api.gdeltproject.org")!,
             timeout: 30,
-            retryPolicy: RetryPolicy(
+            retryPolicy: EndpointConfiguration.RetryPolicy(
                 maxRetries: 3,
                 baseDelay: 1.0,
                 maxDelay: 10.0,
@@ -72,7 +72,7 @@ enum EndpointConfigurations {
         EndpointConfiguration(
             baseURL: URL(string: "https://opensky-network.org")!,
             timeout: 30,
-            retryPolicy: RetryPolicy(
+            retryPolicy: EndpointConfiguration.RetryPolicy(
                 maxRetries: 3,
                 baseDelay: 2.0,
                 maxDelay: 30.0,
@@ -129,7 +129,7 @@ enum EndpointConfigurations {
         EndpointConfiguration(
             baseURL: URL(string: "https://query1.finance.yahoo.com/v8")!,
             timeout: 30,
-            retryPolicy: RetryPolicy(
+            retryPolicy: EndpointConfiguration.RetryPolicy(
                 maxRetries: 3,
                 baseDelay: 0.5,
                 maxDelay: 10.0,
@@ -142,7 +142,7 @@ enum EndpointConfigurations {
         EndpointConfiguration(
             baseURL: URL(string: "https://api.coingecko.com/api/v3")!,
             timeout: 30,
-            retryPolicy: RetryPolicy(
+            retryPolicy: EndpointConfiguration.RetryPolicy(
                 maxRetries: 5,
                 baseDelay: 2.0,
                 maxDelay: 60.0,

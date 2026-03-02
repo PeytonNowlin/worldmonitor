@@ -91,7 +91,7 @@ actor TravelAdvisoryService {
     private func parseAdvisories(_ data: Data) -> [TravelAdvisory] {
         do {
             if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                return json.compactMap { item in
+                return json.compactMap { item -> TravelAdvisory? in
                     guard let countryCode = item["country_code"] as? String ??
                           item["iso3"] as? String,
                           let countryName = item["country_name"] as? String ??
@@ -104,7 +104,6 @@ actor TravelAdvisoryService {
                     let level = TravelAdvisory.AdvisoryLevel(rawValue: levelInt) ?? .level1
                     
                     return TravelAdvisory(
-                        id: countryCode,
                         countryName: countryName,
                         countryCode: countryCode,
                         advisoryLevel: level,

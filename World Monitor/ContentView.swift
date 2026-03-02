@@ -545,84 +545,96 @@ struct ContentView: View {
             }
             .frame(height: 320)
 
-            HStack {
-                ForEach(MapLayer.allCases) { layer in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MapLayer.allCases) { layer in
+                        Button {
+                            viewModel.toggleLayer(layer)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(viewModel.layerVisibility.isVisible(layer) ? layer.tint : Color.secondary)
+                                    .frame(width: 8, height: 8)
+                                Text(layer.title)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.secondarySystemBackground), in: Capsule())
+                        }
+                    }
+
+                    // New layer toggles
                     Button {
-                        viewModel.toggleLayer(layer)
+                        viewModel.showGPSJamming.toggle()
                     } label: {
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(viewModel.layerVisibility.isVisible(layer) ? layer.tint : Color.secondary)
+                                .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
                                 .frame(width: 8, height: 8)
-                            Text(layer.title)
+                            Text("GPS Jamming")
                                 .font(.caption2)
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(Color(.secondarySystemBackground), in: Capsule())
                     }
-                }
 
-                // New layer toggles
-                Button {
-                    viewModel.showGPSJamming.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
-                            .frame(width: 8, height: 8)
-                        Text("GPS Jamming")
-                            .font(.caption2)
+                    Button {
+                        viewModel.showMilitaryBases.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(viewModel.showMilitaryBases ? .purple : Color.secondary)
+                                .frame(width: 8, height: 8)
+                            Text("Bases")
+                                .font(.caption2)
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
-                }
 
-                Button {
-                    viewModel.showMilitaryBases.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(viewModel.showMilitaryBases ? .purple : Color.secondary)
-                            .frame(width: 8, height: 8)
-                        Text("Bases")
-                            .font(.caption2)
+                    Button {
+                        viewModel.showConflictEvents.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(viewModel.showConflictEvents ? .red : Color.secondary)
+                                .frame(width: 8, height: 8)
+                            Text("Conflicts")
+                                .font(.caption2)
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
-                }
 
-                Button {
-                    viewModel.showConflictEvents.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(viewModel.showConflictEvents ? .red : Color.secondary)
-                            .frame(width: 8, height: 8)
-                        Text("Conflicts")
-                            .font(.caption2)
+                    // Cyber Threats Toggle
+                    Button {
+                        viewModel.showCyberThreats.toggle()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(viewModel.showCyberThreats ? .red : Color.secondary)
+                                .frame(width: 8, height: 8)
+                            Text("Cyber")
+                                .font(.caption2)
+                                .lineLimit(1)
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
-                }
-
-                // Cyber Threats Toggle
-                Button {
-                    viewModel.showCyberThreats.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(viewModel.showCyberThreats ? .red : Color.secondary)
-                            .frame(width: 8, height: 8)
-                        Text("Cyber")
-                            .font(.caption2)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
                 }
             }
 

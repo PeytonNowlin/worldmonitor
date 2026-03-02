@@ -242,7 +242,7 @@ actor RateLimiter {
     
     /// Wait until a token is available
     func waitForToken() async {
-        while !await tryConsume() {
+        while !tryConsume() {
             let waitTime = 1.0 / refillRate
             try? await Task.sleep(nanoseconds: UInt64(waitTime * 1_000_000_000))
         }

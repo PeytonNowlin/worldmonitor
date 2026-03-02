@@ -122,7 +122,7 @@ actor FAAAirportService {
             let decoder = JSONDecoder()
             let response = try decoder.decode(FAAAirportResponse.self, from: data)
             
-            return response.status.compactMap { status in
+            return response.status.compactMap { status -> AirportDelay? in
                 guard let iata = status.iata else { return nil }
                 
                 let airportStatus: AirportDelay.AirportStatus
@@ -130,14 +130,13 @@ actor FAAAirportService {
                     airportStatus = .delay
                 } else if status.groundStop?.groundStop == true {
                     airportStatus = .groundStop
-                } else if status.delayCount?.delayed > 0 {
+                } else if (status.delayCount?.delayed ?? 0) > 0 {
                     airportStatus = .delay
                 } else {
                     airportStatus = .normal
                 }
                 
                 return AirportDelay(
-                    id: iata,
                     iata: iata,
                     icao: status.icao ?? "",
                     name: status.name ?? iata,
@@ -164,14 +163,13 @@ actor FAAAirportService {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let airports = json["airports"] as? [[String: Any]] {
                 
-                return airports.compactMap { airport in
+                return airports.compactMap { airport -> AirportDelay? in
                     guard let iata = airport["iata"] as? String else { return nil }
                     
                     let statusString = airport["status"] as? String ?? "normal"
                     let status = AirportDelay.AirportStatus(rawValue: statusString.capitalized) ?? .normal
                     
                     return AirportDelay(
-                        id: iata,
                         iata: iata,
                         icao: airport["icao"] as? String ?? "",
                         name: airport["name"] as? String ?? iata,

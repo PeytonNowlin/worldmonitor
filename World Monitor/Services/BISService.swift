@@ -71,7 +71,6 @@ actor BISService {
             // Return static fallback data if API fails
             return majorBanks.map { bank in
                 BISPolicyRate(
-                    id: bank.0,
                     countryCode: bank.0,
                     countryName: bank.1,
                     rate: 0, // Unknown

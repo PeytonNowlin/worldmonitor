@@ -56,7 +56,6 @@ actor YahooFinanceService {
                 let changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0
                 
                 return YahooQuote(
-                    id: symbol,
                     symbol: symbol,
                     name: meta["shortName"] as? String ?? symbol,
                     price: price,
@@ -224,7 +223,7 @@ enum ChartRange: String {
 }
 
 struct StockSearchResult: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     let symbol: String
     let name: String
     let exchange: String?

@@ -128,7 +128,7 @@ actor URLhausService {
 
 // MARK: - Statistics Model
 
-struct URLhausStats: Codable {
+struct URLhausStats {
     let totalInSample: Int
     let onlineCount: Int
     let offlineCount: Int
@@ -136,14 +136,4 @@ struct URLhausStats: Codable {
     let byMalwareFamily: [String: Int]
     let topTags: [(tag: String, count: Int)]
     let lastUpdated: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case totalInSample
-        case onlineCount
-        case offlineCount
-        case byCountry
-        case byMalwareFamily
-        case topTags
-        case lastUpdated
-    }
 }

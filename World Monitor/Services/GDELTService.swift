@@ -118,7 +118,7 @@ actor GDELTService {
         let endDate = Date()
         let startDate = calendar.date(byAdding: .day, value: -days, to: endDate)!
         
-        var queryItems: [URLQueryItem] = [
+        let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "QUERY", value: themes?.joined(separator: ";") ?? ""),
             URLQueryItem(name: "STARTDATETIME", value: formatDate(startDate)),
             URLQueryItem(name: "ENDDATETIME", value: formatDate(endDate)),
@@ -138,7 +138,7 @@ actor GDELTService {
         
         // Note: GKG API returns CSV-like data, this is a simplified version
         // In production, you'd need a CSV parser for the actual GKG response
-        let data = try await httpClient.fetchData(url: url, source: .gdelt)
+        _ = try await httpClient.fetchData(url: url, source: .gdelt)
         
         // Parse the response (GKG returns tabular data, not JSON)
         // This is a placeholder - real implementation would parse the actual format
