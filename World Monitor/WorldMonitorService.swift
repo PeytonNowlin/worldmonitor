@@ -8,10 +8,40 @@ struct FeedQuery {
 }
 
 protocol WorldMonitorService {
+    // MARK: - Core Dashboard Data
     func snapshot(for query: FeedQuery) async throws -> MonitoringSnapshot
     func headlines(for query: FeedQuery) async throws -> [FeedItem]
     func naturalEvents(for query: FeedQuery) async throws -> [NaturalEvent]
     func militaryOverview(for query: FeedQuery) async throws -> MilitaryOverview
+    
+    // MARK: - Conflict & Security
+    func gdeltEvents(for query: FeedQuery) async throws -> [GDELTEvent]
+    func ucdpConflicts(for query: FeedQuery) async throws -> [UCDPConflictEvent]
+    
+    // MARK: - Military Data
+    func gpsJammingData(region: GPSJamRegion?) async throws -> [GPSJamHexCell]
+    func militaryBases(for region: RegionPreset) async -> [MilitaryBase]
+    
+    // MARK: - Cyber Threat Intelligence
+    func c2Servers() async throws -> [FeodoC2Server]
+    func maliciousURLs() async throws -> [URLhausEntry]
+    func c2Intel() async throws -> [C2IntelIOC]
+    
+    // MARK: - Market Data
+    func marketQuotes(indices: [MarketIndex]) async throws -> [YahooQuote]
+    func cryptoAssets(coins: [CryptoCoin]) async throws -> [CryptoAsset]
+    func stablecoinHealth() async throws -> [StablecoinHealth]
+    func fearGreedIndex() async throws -> FearGreedIndex
+    func bitcoinHashrate() async throws -> BitcoinHashrate
+    func policyRates() async throws -> [BISPolicyRate]
+    
+    // MARK: - Infrastructure
+    func internetConnectivity() async throws -> [CloudflareRadarData]
+    func displacementData() async throws -> [DisplacementData]
+    
+    // MARK: - Travel & Safety
+    func travelAdvisories() async throws -> [TravelAdvisory]
+    func airportDelays() async throws -> [AirportDelay]
 }
 
 private actor NaturalEventCache {
@@ -647,6 +677,81 @@ struct LiveWorldMonitorService: WorldMonitorService {
             return "amphibious"
         }
         return "vessel"
+    }
+    
+    // MARK: - WorldMonitorService Protocol Extensions (New Endpoints)
+    
+    func gdeltEvents(for query: FeedQuery) async throws -> [GDELTEvent] {
+        return try await GDELTService.shared.fetchRecentSignificantEvents(
+            days: Int(query.window.interval / 86400),
+            region: query.region == .global ? nil : query.region
+        )
+    }
+    
+    func ucdpConflicts(for query: FeedQuery) async throws -> [UCDPConflictEvent] {
+        return try await UCDPService.shared.fetchActiveConflicts(
+            region: query.region == .global ? nil : query.region
+        )
+    }
+    
+    func gpsJammingData(region: GPSJamRegion?) async throws -> [GPSJamHexCell] {
+        return try await GPSJamService.shared.fetchJammingData(region: region)
+    }
+    
+    func militaryBases(for region: RegionPreset) async -> [MilitaryBase] {
+        return await MilitaryBasesService.shared.fetchBasesInRegion(region)
+    }
+    
+    func c2Servers() async throws -> [FeodoC2Server] {
+        return try await FeodoTrackerService.shared.fetchC2Servers(minSeverity: .medium)
+    }
+    
+    func maliciousURLs() async throws -> [URLhausEntry] {
+        return try await URLhausService.shared.fetchActiveURLs(limit: 100)
+    }
+    
+    func c2Intel() async throws -> [C2IntelIOC] {
+        return try await C2IntelService.shared.fetchHighConfidenceIOC()
+    }
+    
+    func marketQuotes(indices: [MarketIndex]) async throws -> [YahooQuote] {
+        return try await YahooFinanceService.shared.fetchQuotes(symbols: indices.map { $0.rawValue })
+    }
+    
+    func cryptoAssets(coins: [CryptoCoin]) async throws -> [CryptoAsset] {
+        return try await CoinGeckoService.shared.fetchMarketData(coins: coins)
+    }
+    
+    func stablecoinHealth() async throws -> [StablecoinHealth] {
+        return try await CoinGeckoService.shared.fetchStablecoinHealth()
+    }
+    
+    func fearGreedIndex() async throws -> FearGreedIndex {
+        return try await FearGreedService.shared.fetchCurrentIndex()
+    }
+    
+    func bitcoinHashrate() async throws -> BitcoinHashrate {
+        return try await MempoolService.shared.fetchHashrate()
+    }
+    
+    func policyRates() async throws -> [BISPolicyRate] {
+        return await BISService.shared.fetchMajorCentralBankRates()
+    }
+    
+    func internetConnectivity() async throws -> [CloudflareRadarData] {
+        return try await CloudflareRadarService.shared.fetchConnectivityData()
+    }
+    
+    func displacementData() async throws -> [DisplacementData] {
+        return try await HAPIService.shared.fetchDisplacementByOrigin()
+    }
+    
+    func travelAdvisories() async throws -> [TravelAdvisory] {
+        return try await TravelAdvisoryService.shared.fetchAllAdvisories()
+    }
+    
+    func airportDelays() async throws -> [AirportDelay] {
+        return try await FAAAirportService.shared.fetchMajorAirportStatus()
     }
 }
 
