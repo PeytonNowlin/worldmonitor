@@ -1,4 +1,6 @@
 import SwiftUI
+import Combine
+import MapKit
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
@@ -8,6 +10,8 @@ final class DashboardViewModel: ObservableObject {
     @Published var snapshot: MonitoringSnapshot = .empty
     @Published var headlines: [FeedItem] = []
     @Published var layerVisibility: LayerVisibilityState = LayerVisibilityState()
+    @Published var naturalEvents: [NaturalEvent] = []
+    @Published var militaryOverview: MilitaryOverview = .empty
     @Published var isRefreshing = false
     @Published var hasError = false
     @Published var liveEnabled = false
@@ -15,8 +19,12 @@ final class DashboardViewModel: ObservableObject {
     private let service: WorldMonitorService
     private var tickerTask: Task<Void, Never>?
 
-    init(service: WorldMonitorService = MockWorldMonitorService.shared) {
+    init(service: WorldMonitorService) {
         self.service = service
+    }
+
+    init() {
+        self.service = LiveWorldMonitorService.shared
     }
 
     func setVariant(_ variant: MonitorVariant) {
@@ -39,17 +47,32 @@ final class DashboardViewModel: ObservableObject {
         hasError = false
         defer { isRefreshing = false }
 
-        do {
-            let query = FeedQuery(variant: selectedVariant, region: selectedRegion, window: selectedWindow)
-            async let snapshot = service.snapshot(for: query)
-            async let feed = service.headlines(for: query)
-            let fetched = try await (snapshot, feed)
-            self.snapshot = fetched.0
-            self.headlines = fetched.1
-        } catch {
+        let query = FeedQuery(variant: selectedVariant, region: selectedRegion, window: selectedWindow)
+        async let snapshotTask = try? service.snapshot(for: query)
+        async let feedTask = try? service.headlines(for: query)
+        async let eventsTask = try? service.naturalEvents(for: query)
+        async let militaryTask = try? service.militaryOverview(for: query)
+
+        let fetchedSnapshot = await snapshotTask
+        let fetchedFeed = await feedTask
+        let fetchedEvents = await eventsTask
+        let fetchedMilitary = await militaryTask
+
+        if let fetchedSnapshot {
+            self.snapshot = fetchedSnapshot
+        }
+        if let fetchedFeed, !fetchedFeed.isEmpty {
+            self.headlines = fetchedFeed
+        }
+        if let fetchedEvents {
+            self.naturalEvents = fetchedEvents
+        }
+        if let fetchedMilitary {
+            self.militaryOverview = fetchedMilitary
+        }
+
+        if fetchedSnapshot == nil, fetchedFeed == nil, fetchedEvents == nil, fetchedMilitary == nil {
             hasError = true
-            self.snapshot = .empty
-            self.headlines = []
         }
     }
 
@@ -111,9 +134,20 @@ struct DashboardCardView: View {
 
 struct ContentView: View {
     @StateObject private var viewModel: DashboardViewModel
+    @State private var mapCameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 20, longitude: 0),
+            span: MKCoordinateSpan(latitudeDelta: 120, longitudeDelta: 120)
+        )
+    )
 
-    init(viewModel: DashboardViewModel = DashboardViewModel()) {
+    init(viewModel: DashboardViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
+    }
+
+    @MainActor
+    init() {
+        _viewModel = StateObject(wrappedValue: DashboardViewModel())
     }
 
     var body: some View {
@@ -218,33 +252,55 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [.black.opacity(0.75), .blue.opacity(0.5), .teal.opacity(0.45)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-
-                VStack(spacing: 10) {
-                    Image(systemName: "globe.americas.fill")
-                        .font(.system(size: 52))
-                    Text(viewModel.snapshot.headline)
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal)
-                    Text("Map overlays update based on selected filters")
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+            ZStack(alignment: .bottomLeading) {
+                Map(position: $mapCameraPosition) {
+                    ForEach(viewModel.naturalEvents) { event in
+                        Annotation(event.title, coordinate: event.coordinate) {
+                            Circle()
+                                .fill(color(for: event))
+                                .frame(width: markerSize(for: event), height: markerSize(for: event))
+                                .overlay(Circle().stroke(.white.opacity(0.85), lineWidth: 1))
+                        }
+                    }
+                    if viewModel.layerVisibility.isVisible(.conflictZones) {
+                        ForEach(viewModel.militaryOverview.flights) { flight in
+                            Annotation(flight.callsign, coordinate: flight.coordinate) {
+                                Image(systemName: "airplane.circle.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.red)
+                                    .padding(2)
+                                    .background(.white.opacity(0.7), in: Circle())
+                            }
+                        }
+                    }
+                    if viewModel.layerVisibility.isVisible(.maritimeTraffic) {
+                        ForEach(viewModel.militaryOverview.vessels) { vessel in
+                            Annotation(vessel.name, coordinate: vessel.coordinate) {
+                                Image(systemName: "ferry.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.blue)
+                                    .padding(4)
+                                    .background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            }
+                        }
+                    }
                 }
-                .foregroundStyle(.white)
-                .padding()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.snapshot.headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    Text("\(viewModel.naturalEvents.count) natural | \(viewModel.militaryOverview.flights.count) flights | \(viewModel.militaryOverview.vessels.count) vessels")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(10)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(10)
             }
-            .frame(height: 300)
+            .frame(height: 320)
 
             HStack {
                 ForEach(MapLayer.allCases) { layer in
@@ -293,7 +349,7 @@ struct ContentView: View {
             DashboardCardView(
                 title: "Infrastructure Cascade",
                 value: "\(viewModel.snapshot.chokepoints) Chokepoints",
-                trend: viewModel.snapshot.macroBias,
+                trend: "\(viewModel.militaryOverview.basesInView) bases in view",
                 color: .yellow
             )
             DashboardCardView(
@@ -336,6 +392,32 @@ struct ContentView: View {
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func color(for event: NaturalEvent) -> Color {
+        switch event.severity {
+        case 5:
+            return .red
+        case 4:
+            return .orange
+        case 3:
+            return .yellow
+        default:
+            return .blue
+        }
+    }
+
+    private func markerSize(for event: NaturalEvent) -> CGFloat {
+        switch event.severity {
+        case 5:
+            return 16
+        case 4:
+            return 13
+        case 3:
+            return 11
+        default:
+            return 9
+        }
     }
 
     private var liveFeedPanel: some View {

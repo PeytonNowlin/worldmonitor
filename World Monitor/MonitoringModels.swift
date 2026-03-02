@@ -1,4 +1,5 @@
 import Foundation
+import MapKit
 import SwiftUI
 
 enum MonitorVariant: String, CaseIterable, Identifiable, Codable {
@@ -182,4 +183,65 @@ struct FeedItem: Identifiable, Hashable, Codable {
         self.source = source
         self.publishedAt = publishedAt
     }
+}
+
+struct NaturalEvent: Identifiable, Hashable {
+    enum Category: String, Hashable {
+        case earthquakes
+        case severeStorms
+        case wildfires
+        case volcanoes
+        case floods
+        case landslides
+        case drought
+        case manmade
+    }
+
+    let id: String
+    let title: String
+    let category: Category
+    let latitude: Double
+    let longitude: Double
+    let severity: Int
+    let source: String
+    let occurredAt: Date
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct MilitaryFlightSignal: Identifiable, Hashable {
+    let id: String
+    let callsign: String
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let speed: Double
+    let lastSeenAt: Date
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct MilitaryVesselSignal: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let region: String
+    let latitude: Double
+    let longitude: Double
+    let vesselType: String
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct MilitaryOverview: Hashable {
+    let flights: [MilitaryFlightSignal]
+    let vessels: [MilitaryVesselSignal]
+    let basesInView: Int
+
+    static let empty = MilitaryOverview(flights: [], vessels: [], basesInView: 0)
 }
