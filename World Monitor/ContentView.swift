@@ -73,6 +73,10 @@ final class DashboardViewModel: ObservableObject {
 
         if fetchedSnapshot == nil, fetchedFeed == nil, fetchedEvents == nil, fetchedMilitary == nil {
             hasError = true
+            snapshot = .empty
+            headlines = []
+            naturalEvents = []
+            militaryOverview = .empty
         }
     }
 
