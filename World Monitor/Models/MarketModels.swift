@@ -286,34 +286,6 @@ struct BISPolicyRate: Identifiable, Codable {
     var id: String { countryCode }
 }
 
-/// BIS Real Effective Exchange Rate
-struct BISREER: Identifiable, Codable {
-    let countryCode: String
-    let countryName: String
-    let value: Double // Index value (base = 100)
-    let change1M: Double
-    let change12M: Double
-    let date: Date
-    
-    var id: String { countryCode }
-    
-    var trend: REERTrend {
-        if change12M > 5 {
-            return .appreciating
-        } else if change12M < -5 {
-            return .depreciating
-        } else {
-            return .stable
-        }
-    }
-    
-    enum REERTrend: String {
-        case appreciating = "Appreciating"
-        case stable = "Stable"
-        case depreciating = "Depreciating"
-    }
-}
-
 // MARK: - Fear & Greed Models
 
 /// Fear and Greed Index from Alternative.me

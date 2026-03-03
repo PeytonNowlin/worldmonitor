@@ -37,66 +37,15 @@ actor BISService {
         }
     }
     
-    /// Fetch Real Effective Exchange Rates (REER)
-    func fetchREER() async throws -> [BISREER] {
-        return try await cache.fetchWithCache(
-            source: .bis,
-            region: "reer",
-            maxAge: DataSource.bis.defaultCacheTTL
-        ) {
-            let url = config.baseURL.appendingPathComponent("/data/WS_REER/all/latest")
-            
-            let data = try await httpClient.fetchData(url: url, source: .bis)
-            
-            return self.parseREER(data)
-        }
-    }
-    
     /// Get major central bank rates
     func fetchMajorCentralBankRates() async throws -> [BISPolicyRate] {
-        let majorBanks = [
-            ("US", "United States"),
-            ("XM", "Euro Area"),
-            ("JP", "Japan"),
-            ("GB", "United Kingdom"),
-            ("CH", "Switzerland"),
-            ("AU", "Australia"),
-            ("CA", "Canada"),
-            ("SE", "Sweden"),
-            ("NO", "Norway"),
-            ("NZ", "New Zealand")
-        ]
+        let majorBanks: Set<String> = ["US", "XM", "JP", "GB", "CH", "AU", "CA", "SE", "NO", "NZ"]
         let allRates = try await fetchPolicyRates()
         
         // Filter to major banks
         return allRates.filter { rate in
-            majorBanks.contains { $0.0 == rate.countryCode }
+            majorBanks.contains(rate.countryCode)
         }.sorted { $0.rate > $1.rate }
-    }
-    
-    /// Get summary statistics
-    func fetchStats() async throws -> BISStats {
-        let rates = try await fetchPolicyRates()
-        let reer = try await fetchREER()
-        
-        let avgRate = rates.map { $0.rate }.reduce(0, +) / Double(rates.count)
-        let negativeRateCountries = rates.filter { $0.rate < 0 }.count
-        let hikingRates = rates.filter { ($0.rateChange ?? 0) > 0 }.count
-        let cuttingRates = rates.filter { ($0.rateChange ?? 0) < 0 }.count
-        
-        let appreciating = reer.filter { $0.change12M > 5 }.count
-        let depreciating = reer.filter { $0.change12M < -5 }.count
-        
-        return BISStats(
-            countriesWithData: rates.count,
-            averagePolicyRate: avgRate,
-            negativeRateCountries: negativeRateCountries,
-            countriesHikingRates: hikingRates,
-            countriesCuttingRates: cuttingRates,
-            appreciatingCurrencies: appreciating,
-            depreciatingCurrencies: depreciating,
-            lastUpdated: Date()
-        )
     }
     
     // MARK: - Private Methods
@@ -149,11 +98,6 @@ actor BISService {
                 frequency: "monthly"
             )
         }
-    }
-    
-    private func parseREER(_ data: Data) -> [BISREER] {
-        // Simplified parsing
-        return []
     }
     
     private func bisCountryName(for code: String) -> String? {
@@ -221,17 +165,4 @@ actor BISService {
             $0.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
         }
     }
-}
-
-// MARK: - Statistics Model
-
-struct BISStats: Codable {
-    let countriesWithData: Int
-    let averagePolicyRate: Double
-    let negativeRateCountries: Int
-    let countriesHikingRates: Int
-    let countriesCuttingRates: Int
-    let appreciatingCurrencies: Int
-    let depreciatingCurrencies: Int
-    let lastUpdated: Date
 }
