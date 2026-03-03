@@ -31,6 +31,9 @@ protocol WorldMonitorService {
     func marketQuotes(indices: [MarketIndex]) async throws -> [YahooQuote]
     func cryptoAssets(coins: [CryptoCoin]) async throws -> [CryptoAsset]
     func fearGreedIndex() async throws -> FearGreedIndex
+    func stablecoinHealth() async throws -> [StablecoinHealth]
+    func policyRates() async throws -> [BISPolicyRate]
+    func bitcoinHashrate() async throws -> BitcoinHashrate
 
     // MARK: - Infrastructure
     func internetConnectivity() async throws -> [CloudflareRadarData]
@@ -721,6 +724,18 @@ struct LiveWorldMonitorService: WorldMonitorService {
     
     func fearGreedIndex() async throws -> FearGreedIndex {
         return try await FearGreedService.shared.fetchCurrentIndex()
+    }
+
+    func stablecoinHealth() async throws -> [StablecoinHealth] {
+        return try await CoinGeckoService.shared.fetchStablecoinHealth()
+    }
+
+    func policyRates() async throws -> [BISPolicyRate] {
+        return try await BISService.shared.fetchMajorCentralBankRates()
+    }
+
+    func bitcoinHashrate() async throws -> BitcoinHashrate {
+        return try await MempoolService.shared.fetchHashrate()
     }
 
     func internetConnectivity() async throws -> [CloudflareRadarData] {

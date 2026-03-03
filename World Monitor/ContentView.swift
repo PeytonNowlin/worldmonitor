@@ -44,6 +44,9 @@ final class DashboardViewModel: ObservableObject {
     @Published var marketIndices: [YahooQuote] = []
     @Published var cryptoAssets: [CryptoAsset] = []
     @Published var fearGreed: FearGreedIndex?
+    @Published var stablecoinHealth: [StablecoinHealth] = []
+    @Published var policyRates: [BISPolicyRate] = []
+    @Published var bitcoinHashrate: BitcoinHashrate?
 
     // MARK: - Infrastructure Data
     @Published var internetConnectivity: [CloudflareRadarData] = []
@@ -186,6 +189,9 @@ final class DashboardViewModel: ObservableObject {
         async let indicesTask = try? service.marketQuotes(indices: [.sp500, .nasdaq, .vix])
         async let cryptoTask = try? service.cryptoAssets(coins: [.bitcoin, .ethereum, .solana])
         async let fearGreedTask = try? service.fearGreedIndex()
+        async let stablecoinTask = try? service.stablecoinHealth()
+        async let policyRatesTask = try? service.policyRates()
+        async let hashrateTask = try? service.bitcoinHashrate()
 
         async let connectivityTask = try? service.internetConnectivity()
         async let displacementTask = try? service.displacementData()
@@ -230,6 +236,9 @@ final class DashboardViewModel: ObservableObject {
         let fetchedIndices = await indicesTask
         let fetchedCrypto = await cryptoTask
         let fetchedFearGreed = await fearGreedTask
+        let fetchedStablecoins = await stablecoinTask
+        let fetchedPolicyRates = await policyRatesTask
+        let fetchedHashrate = await hashrateTask
         let fetchedConnectivity = await connectivityTask
         let fetchedDisplacement = await displacementTask
         let fetchedAdvisories = await advisoriesTask
@@ -239,7 +248,14 @@ final class DashboardViewModel: ObservableObject {
         gdeltFailed = fetchedGDELT == nil
         ucdpFailed = fetchedUCDP == nil
         cyberIntelFailed = fetchedC2 == nil || fetchedURLhaus == nil || fetchedC2Intel == nil
-        marketDataFailed = fetchedIndices == nil || fetchedCrypto == nil
+        marketDataFailed = fetchedIndices == nil
+            || fetchedIndices?.isEmpty == true
+            || fetchedCrypto == nil
+            || fetchedCrypto?.isEmpty == true
+            || fetchedStablecoins == nil
+            || fetchedStablecoins?.isEmpty == true
+            || fetchedPolicyRates?.isEmpty == true
+            || fetchedHashrate == nil
         travelSafetyFailed = fetchedAdvisories == nil || fetchedAirports == nil
 
         // Assign new data
@@ -250,9 +266,12 @@ final class DashboardViewModel: ObservableObject {
         if let fetchedC2 { self.c2Servers = fetchedC2 }
         if let fetchedURLhaus { self.maliciousURLs = fetchedURLhaus }
         if let fetchedC2Intel { self.c2IntelIndicators = fetchedC2Intel }
-        if let fetchedIndices { self.marketIndices = fetchedIndices }
-        if let fetchedCrypto { self.cryptoAssets = fetchedCrypto }
+        self.marketIndices = fetchedIndices ?? []
+        self.cryptoAssets = fetchedCrypto ?? []
         self.fearGreed = fetchedFearGreed
+        self.stablecoinHealth = fetchedStablecoins ?? []
+        self.policyRates = fetchedPolicyRates ?? []
+        self.bitcoinHashrate = fetchedHashrate
         if let fetchedConnectivity { self.internetConnectivity = fetchedConnectivity }
         if let fetchedDisplacement { self.displacementData = fetchedDisplacement }
         if let fetchedAdvisories { self.travelAdvisories = fetchedAdvisories }
@@ -777,6 +796,95 @@ struct ContentView: View {
                     }
                 }
             }
+
+            Divider()
+
+            // Stablecoin Health
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Stablecoin Peg Health")
+                    .font(.caption.weight(.semibold))
+
+                if viewModel.stablecoinHealth.isEmpty {
+                    Text("Stablecoin data pending")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.stablecoinHealth) { coin in
+                        HStack {
+                            Circle()
+                                .fill(stablecoinColor(coin.status))
+                                .frame(width: 8, height: 8)
+                            Text("\(coin.symbol) · \(coin.name)")
+                                .font(.caption2.weight(.medium))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(String(format: "%.2f%%", coin.deviation))
+                                .font(.caption2)
+                                .foregroundStyle(stablecoinColor(coin.status))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            // Major Policy Rates
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Major Central Bank Policy Rates")
+                    .font(.caption.weight(.semibold))
+
+                if viewModel.policyRates.isEmpty {
+                    Text("Policy rate data pending")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.policyRates.prefix(8)) { rate in
+                        HStack {
+                            Text(rate.countryName)
+                                .font(.caption2)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(String(format: "%.2f%%", rate.rate))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.primary)
+                            if let change = rate.rateChange {
+                                Text(String(format: "%+.2f", change))
+                                    .font(.caption2)
+                                    .foregroundStyle(change >= 0 ? .green : .red)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            // Bitcoin Hashrate
+            if let hashrate = viewModel.bitcoinHashrate {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Bitcoin Network")
+                        .font(.caption.weight(.semibold))
+
+                    HStack {
+                        Text("Hashrate")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.2f EH/s", hashrate.currentHashrate))
+                            .font(.caption2.monospaced())
+                    }
+
+                    HStack {
+                        Text("Difficulty")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(String(format: "%.2f", hashrate.currentDifficulty))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(hashrateColor(hashrate.difficultyChange))
+                    }
+                }
+            }
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -993,6 +1101,24 @@ struct ContentView: View {
         case .greed: return .green
         case .extremeGreed: return .green
         }
+    }
+
+    private func stablecoinColor(_ status: StablecoinHealth.StablecoinStatus) -> Color {
+        switch status {
+        case .onPeg:
+            return .green
+        case .slightDepeg:
+            return .yellow
+        case .depegged:
+            return .red
+        }
+    }
+
+    private func hashrateColor(_ change: Double) -> Color {
+        if change >= 0 {
+            return .green
+        }
+        return .red
     }
 
     private func color(for event: NaturalEvent) -> Color {
