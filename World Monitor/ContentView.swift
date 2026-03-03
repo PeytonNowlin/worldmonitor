@@ -2,6 +2,55 @@ import SwiftUI
 import Combine
 import MapKit
 
+enum DashboardSection: String, CaseIterable {
+    case core
+    case conflictSecurity
+    case cyberThreats
+    case market
+    case infrastructure
+    case travelSafety
+
+    var title: String {
+        switch self {
+        case .core:
+            "Core"
+        case .conflictSecurity:
+            "Conflict"
+        case .cyberThreats:
+            "Cyber"
+        case .market:
+            "Market"
+        case .infrastructure:
+            "Infrastructure"
+        case .travelSafety:
+            "Travel"
+        }
+    }
+}
+
+enum DashboardSectionLoadState: String {
+    case idle
+    case stale
+    case refreshing
+    case fresh
+    case failed
+
+    var color: Color {
+        switch self {
+        case .idle:
+            return .secondary
+        case .stale:
+            return .orange
+        case .refreshing:
+            return .blue
+        case .fresh:
+            return .green
+        case .failed:
+            return .red
+        }
+    }
+}
+
 @MainActor
 final class DashboardViewModel: ObservableObject {
     @Published var selectedVariant: MonitorVariant = .world
@@ -15,6 +64,9 @@ final class DashboardViewModel: ObservableObject {
     @Published var isRefreshing = false
     @Published var hasError = false
     @Published var liveEnabled = false
+    @Published var sectionLoadState: [DashboardSection: DashboardSectionLoadState] = Dictionary(
+        uniqueKeysWithValues: DashboardSection.allCases.map { ($0, .idle) }
+    )
 
     // Track individual data source failures for partial error detection
     @Published var snapshotFailed = false
@@ -61,6 +113,22 @@ final class DashboardViewModel: ObservableObject {
     @Published var showGPSJamming: Bool = false
     @Published var showMilitaryBases: Bool = false
     @Published var showConflictEvents: Bool = false
+
+    private struct CacheKey: Hashable {
+        let bucket: String
+        let context: String
+    }
+
+    private struct CacheEntry {
+        let fetchedAt: Date
+        let payload: Any
+    }
+
+    private static let coreFreshnessWindow: TimeInterval = 5
+    private static let backgroundFreshnessWindow: TimeInterval = 30
+    private var cacheByKey: [CacheKey: CacheEntry] = [:]
+    private var refreshTask: Task<Void, Never>?
+    private var refreshVersion = 0
 
     // Visible map region for viewport culling
     @Published var visibleMapRegion: MKCoordinateRegion = MKCoordinateRegion(
@@ -156,7 +224,12 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func refresh() async {
+        refreshVersion += 1
+        let version = refreshVersion
+        refreshTask?.cancel()
+
         isRefreshing = true
+        sectionLoadState = Dictionary(uniqueKeysWithValues: DashboardSection.allCases.map { ($0, .refreshing) })
         hasError = false
         snapshotFailed = false
         headlinesFailed = false
@@ -167,122 +240,454 @@ final class DashboardViewModel: ObservableObject {
         cyberIntelFailed = false
         marketDataFailed = false
         travelSafetyFailed = false
-        defer { isRefreshing = false }
+
+        refreshTask = Task { [weak self] in
+            await self?.performRefresh(version: version)
+        }
+    }
+
+    func cancelRefreshes() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        isRefreshing = false
+        for section in DashboardSection.allCases {
+            sectionLoadState[section] = .idle
+        }
+    }
+
+    private func performRefresh(version: Int) async {
+        defer {
+            let stillCurrent = isCurrentVersion(version)
+            if stillCurrent {
+                isRefreshing = false
+            }
+            if stillCurrent {
+                refreshTask = nil
+            }
+        }
+
+        guard isCurrentVersion(version) else { return }
 
         let query = FeedQuery(variant: selectedVariant, region: selectedRegion, window: selectedWindow)
+        let cacheContext = cacheContext(for: query)
 
-        async let snapshotTask = try? service.snapshot(for: query)
-        async let feedTask = try? service.headlines(for: query)
-        async let eventsTask = try? service.naturalEvents(for: query)
-        async let militaryTask = try? service.militaryOverview(for: query)
+        guard !Task.isCancelled, isCurrentVersion(version) else { return }
 
-        async let gdeltTask = try? service.gdeltEvents(for: query)
-        async let ucdpTask = try? service.ucdpConflicts(for: query)
+        let coreBuckets = ["snapshot", "headlines", "naturalEvents", "militaryOverview"]
+        let conflictBuckets = ["gdelt", "ucdp", "gpsJam", "militaryBases"]
+        let cyberBuckets = ["c2Servers", "maliciousURLs", "c2Intel"]
+        let marketBuckets = ["marketIndices", "cryptoAssets", "fearGreed", "stablecoins", "policyRates", "bitcoinHashrate"]
+        let infrastructureBuckets = ["connectivity", "displacement"]
+        let travelBuckets = ["advisories", "airports"]
 
-        async let gpsJamTask = try? service.gpsJammingData(region: nil)
-        async let basesTask = service.militaryBases(for: selectedRegion)
+        let shouldRefreshCore = !hasAllSectionCache(buckets: coreBuckets, context: cacheContext, maxAge: Self.coreFreshnessWindow)
+        let shouldRefreshConflictSecurity = !hasAllSectionCache(
+            buckets: conflictBuckets,
+            context: cacheContext,
+            maxAge: Self.backgroundFreshnessWindow
+        )
+        let shouldRefreshCyber = !hasAllSectionCache(
+            buckets: cyberBuckets,
+            context: cacheContext,
+            maxAge: Self.backgroundFreshnessWindow
+        )
+        let shouldRefreshMarket = !hasAllSectionCache(
+            buckets: marketBuckets,
+            context: cacheContext,
+            maxAge: Self.backgroundFreshnessWindow
+        )
+        let shouldRefreshInfrastructure = !hasAllSectionCache(
+            buckets: infrastructureBuckets,
+            context: cacheContext,
+            maxAge: Self.backgroundFreshnessWindow
+        )
+        let shouldRefreshTravelSafety = !hasAllSectionCache(
+            buckets: travelBuckets,
+            context: cacheContext,
+            maxAge: Self.backgroundFreshnessWindow
+        )
 
-        async let c2Task = try? service.c2Servers()
-        async let urlhausTask = try? service.maliciousURLs()
-        async let c2IntelTask = try? service.c2Intel()
-
-        async let indicesTask = try? service.marketQuotes(indices: [.sp500, .nasdaq, .vix])
-        async let cryptoTask = try? service.cryptoAssets(coins: [.bitcoin, .ethereum, .solana])
-        async let fearGreedTask = try? service.fearGreedIndex()
-        async let stablecoinTask = try? service.stablecoinHealth()
-        async let policyRatesTask = try? service.policyRates()
-        async let hashrateTask = try? service.bitcoinHashrate()
-
-        async let connectivityTask = try? service.internetConnectivity()
-        async let displacementTask = try? service.displacementData()
-
-        async let advisoriesTask = try? service.travelAdvisories()
-        async let airportsTask = try? service.airportDelays()
-        let fetchedSnapshot = await snapshotTask
-        let fetchedFeed = await feedTask
-        let fetchedEvents = await eventsTask
-        let fetchedMilitary = await militaryTask
-
-        // Track individual failures for partial error detection
-        snapshotFailed = fetchedSnapshot == nil
-        headlinesFailed = fetchedFeed == nil
-        naturalEventsFailed = fetchedEvents == nil
-        militaryOverviewFailed = fetchedMilitary == nil
-
-        // Set hasError if ANY core source fails
-        hasError = snapshotFailed || headlinesFailed || naturalEventsFailed || militaryOverviewFailed
-
-        if let fetchedSnapshot {
-            self.snapshot = fetchedSnapshot
+        if let cachedSnapshot: MonitoringSnapshot = readCached(bucket: "snapshot", context: cacheContext, maxAge: Self.coreFreshnessWindow) {
+            snapshot = cachedSnapshot
         }
-        if let fetchedFeed, !fetchedFeed.isEmpty {
-            self.headlines = fetchedFeed
+        if let cachedHeadlines: [FeedItem] = readCached(bucket: "headlines", context: cacheContext, maxAge: Self.coreFreshnessWindow),
+           !cachedHeadlines.isEmpty {
+            headlines = cachedHeadlines
         }
-        if let fetchedEvents {
-            self.naturalEvents = fetchedEvents
+        if let cachedNaturalEvents: [NaturalEvent] = readCached(bucket: "naturalEvents", context: cacheContext, maxAge: Self.coreFreshnessWindow) {
+            naturalEvents = cachedNaturalEvents
         }
-        if let fetchedMilitary {
-            self.militaryOverview = fetchedMilitary
+        if let cachedMilitary: MilitaryOverview = readCached(bucket: "militaryOverview", context: cacheContext, maxAge: Self.coreFreshnessWindow) {
+            militaryOverview = cachedMilitary
+        }
+        if let cachedGDELT: [GDELTEvent] = readCached(bucket: "gdelt", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            gdeltEvents = cachedGDELT
+        }
+        if let cachedUCDP: [UCDPConflictEvent] = readCached(bucket: "ucdp", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            ucdpConflicts = cachedUCDP
+        }
+        if let cachedGPSJam: [GPSJamHexCell] = readCached(bucket: "gpsJam", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            gpsJammingCells = cachedGPSJam
+        }
+        if let cachedMilitaryBases: [MilitaryBase] = readCached(bucket: "militaryBases", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            militaryBases = cachedMilitaryBases
+        }
+        if let cachedC2Servers: [FeodoC2Server] = readCached(bucket: "c2Servers", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            c2Servers = cachedC2Servers
+        }
+        if let cachedMaliciousURLs: [URLhausEntry] = readCached(bucket: "maliciousURLs", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            maliciousURLs = cachedMaliciousURLs
+        }
+        if let cachedC2Intel: [C2IntelIOC] = readCached(bucket: "c2Intel", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            c2IntelIndicators = cachedC2Intel
+        }
+        if let cachedMarketIndices: [YahooQuote] = readCached(bucket: "marketIndices", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            marketIndices = cachedMarketIndices
+        }
+        if let cachedCryptoAssets: [CryptoAsset] = readCached(bucket: "cryptoAssets", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            cryptoAssets = cachedCryptoAssets
+        }
+        if let cachedFearGreed: FearGreedIndex = readCached(bucket: "fearGreed", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            fearGreed = cachedFearGreed
+        }
+        if let cachedStablecoins: [StablecoinHealth] = readCached(bucket: "stablecoins", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            stablecoinHealth = cachedStablecoins
+        }
+        if let cachedPolicyRates: [BISPolicyRate] = readCached(bucket: "policyRates", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            policyRates = cachedPolicyRates
+        }
+        if let cachedBitcoinHashrate: BitcoinHashrate = readCached(bucket: "bitcoinHashrate", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            bitcoinHashrate = cachedBitcoinHashrate
+        }
+        if let cachedConnectivity: [CloudflareRadarData] = readCached(bucket: "connectivity", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            internetConnectivity = cachedConnectivity
+        }
+        if let cachedDisplacement: [DisplacementData] = readCached(bucket: "displacement", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            displacementData = cachedDisplacement
+        }
+        if let cachedAdvisories: [TravelAdvisory] = readCached(bucket: "advisories", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            travelAdvisories = cachedAdvisories
+        }
+        if let cachedAirportDelays: [AirportDelay] = readCached(bucket: "airports", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
+            airportDelays = cachedAirportDelays
         }
 
-        // Assign new data sources (non-core, don't trigger error state)
-        let fetchedGDELT = await gdeltTask
-        let fetchedUCDP = await ucdpTask
-        let fetchedGPSJam = await gpsJamTask
-        let fetchedBases = await basesTask
-        let fetchedC2 = await c2Task
-        let fetchedURLhaus = await urlhausTask
-        let fetchedC2Intel = await c2IntelTask
-        let fetchedIndices = await indicesTask
-        let fetchedCrypto = await cryptoTask
-        let fetchedFearGreed = await fearGreedTask
-        let fetchedStablecoins = await stablecoinTask
-        let fetchedPolicyRates = await policyRatesTask
-        let fetchedHashrate = await hashrateTask
-        let fetchedConnectivity = await connectivityTask
-        let fetchedDisplacement = await displacementTask
-        let fetchedAdvisories = await advisoriesTask
-        let fetchedAirports = await airportsTask
+        sectionLoadState[.core] = shouldRefreshCore
+            ? (hasAnySectionCache(buckets: coreBuckets, context: cacheContext, maxAge: Self.coreFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
+        sectionLoadState[.conflictSecurity] = shouldRefreshConflictSecurity
+            ? (hasAnySectionCache(buckets: conflictBuckets, context: cacheContext, maxAge: Self.backgroundFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
+        sectionLoadState[.cyberThreats] = shouldRefreshCyber
+            ? (hasAnySectionCache(buckets: cyberBuckets, context: cacheContext, maxAge: Self.backgroundFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
+        sectionLoadState[.market] = shouldRefreshMarket
+            ? (hasAnySectionCache(buckets: marketBuckets, context: cacheContext, maxAge: Self.backgroundFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
+        sectionLoadState[.infrastructure] = shouldRefreshInfrastructure
+            ? (hasAnySectionCache(buckets: infrastructureBuckets, context: cacheContext, maxAge: Self.backgroundFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
+        sectionLoadState[.travelSafety] = shouldRefreshTravelSafety
+            ? (hasAnySectionCache(buckets: travelBuckets, context: cacheContext, maxAge: Self.backgroundFreshnessWindow) ? .stale : .refreshing)
+            : .fresh
 
-        // Track new data source failures
-        gdeltFailed = fetchedGDELT == nil
-        ucdpFailed = fetchedUCDP == nil
-        cyberIntelFailed = fetchedC2 == nil || fetchedURLhaus == nil || fetchedC2Intel == nil
-        marketDataFailed = fetchedIndices == nil
-            || fetchedIndices?.isEmpty == true
-            || fetchedCrypto == nil
-            || fetchedCrypto?.isEmpty == true
-            || fetchedStablecoins == nil
-            || fetchedStablecoins?.isEmpty == true
-            || fetchedPolicyRates?.isEmpty == true
-            || fetchedHashrate == nil
-        travelSafetyFailed = fetchedAdvisories == nil || fetchedAirports == nil
+        if !(
+            shouldRefreshCore ||
+            shouldRefreshConflictSecurity ||
+            shouldRefreshCyber ||
+            shouldRefreshMarket ||
+            shouldRefreshInfrastructure ||
+            shouldRefreshTravelSafety
+        ) {
+            return
+        }
 
-        // Assign new data
-        if let fetchedGDELT { self.gdeltEvents = fetchedGDELT }
-        if let fetchedUCDP { self.ucdpConflicts = fetchedUCDP }
-        if let fetchedGPSJam { self.gpsJammingCells = fetchedGPSJam }
-        self.militaryBases = fetchedBases
-        if let fetchedC2 { self.c2Servers = fetchedC2 }
-        if let fetchedURLhaus { self.maliciousURLs = fetchedURLhaus }
-        if let fetchedC2Intel { self.c2IntelIndicators = fetchedC2Intel }
-        self.marketIndices = fetchedIndices ?? []
-        self.cryptoAssets = fetchedCrypto ?? []
-        self.fearGreed = fetchedFearGreed
-        self.stablecoinHealth = fetchedStablecoins ?? []
-        self.policyRates = fetchedPolicyRates ?? []
-        self.bitcoinHashrate = fetchedHashrate
-        if let fetchedConnectivity { self.internetConnectivity = fetchedConnectivity }
-        if let fetchedDisplacement { self.displacementData = fetchedDisplacement }
-        if let fetchedAdvisories { self.travelAdvisories = fetchedAdvisories }
-        if let fetchedAirports { self.airportDelays = fetchedAirports }
+        if shouldRefreshCore {
+            sectionLoadState[.core] = .refreshing
+            async let snapshotTask: MonitoringSnapshot? = safeCall { try await self.service.snapshot(for: query) }
+            async let feedTask: [FeedItem]? = safeCall { try await self.service.headlines(for: query) }
+            async let eventsTask: [NaturalEvent]? = safeCall { try await self.service.naturalEvents(for: query) }
+            async let militaryTask: MilitaryOverview? = safeCall { try await self.service.militaryOverview(for: query) }
 
-        // Only clear data on total failure (all core sources failed)
+            let fetchedSnapshot = await snapshotTask
+            let fetchedFeed = await feedTask
+            let fetchedEvents = await eventsTask
+            let fetchedMilitary = await militaryTask
+
+            if Task.isCancelled || !isCurrentVersion(version) { return }
+
+            let newSnapshotFailed = fetchedSnapshot == nil
+            let newHeadlinesFailed = fetchedFeed == nil
+            let newNaturalEventsFailed = fetchedEvents == nil
+            let newMilitaryOverviewFailed = fetchedMilitary == nil
+
+            // Final guard before mutating state: ensure we're still the current version
+            guard isCurrentVersion(version) else { return }
+
+            snapshotFailed = newSnapshotFailed
+            headlinesFailed = newHeadlinesFailed
+            naturalEventsFailed = newNaturalEventsFailed
+            militaryOverviewFailed = newMilitaryOverviewFailed
+            hasError = newSnapshotFailed || newHeadlinesFailed || newNaturalEventsFailed || newMilitaryOverviewFailed
+
+            if let fetchedSnapshot {
+                snapshot = fetchedSnapshot
+                writeCache(bucket: "snapshot", context: cacheContext, value: fetchedSnapshot)
+            }
+            if let fetchedHeadlines = fetchedFeed, !fetchedHeadlines.isEmpty {
+                headlines = fetchedHeadlines
+                writeCache(bucket: "headlines", context: cacheContext, value: fetchedHeadlines)
+            }
+            if let fetchedEvents {
+                naturalEvents = fetchedEvents
+                writeCache(bucket: "naturalEvents", context: cacheContext, value: fetchedEvents)
+            }
+            if let fetchedMilitary {
+                militaryOverview = fetchedMilitary
+                writeCache(bucket: "militaryOverview", context: cacheContext, value: fetchedMilitary)
+            }
+            sectionLoadState[.core] = hasError ? .failed : .fresh
+        }
+
+        if shouldRefreshConflictSecurity {
+            sectionLoadState[.conflictSecurity] = .refreshing
+            async let gdeltTask: [GDELTEvent]? = safeCall { try await self.service.gdeltEvents(for: query) }
+            async let ucdpTask: [UCDPConflictEvent]? = safeCall { try await self.service.ucdpConflicts(for: query) }
+            let fetchedGDELT = await gdeltTask
+            let fetchedUCDP = await ucdpTask
+
+            async let gpsJamTask: [GPSJamHexCell]? = safeCall { try await self.service.gpsJammingData(region: nil) }
+            async let basesTask: [MilitaryBase]? = safeCall { await self.service.militaryBases(for: selectedRegion) }
+            let fetchedGPSJam = await gpsJamTask
+            let fetchedBases = await basesTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            let newGdeltFailed = fetchedGDELT == nil
+            let newUcdpFailed = fetchedUCDP == nil
+
+            // Final guard before mutating state: ensure we're still the current version
+            guard isCurrentVersion(version) else { return }
+
+            gdeltFailed = newGdeltFailed
+            ucdpFailed = newUcdpFailed
+            if let fetchedGDELT {
+                gdeltEvents = fetchedGDELT
+                writeCache(bucket: "gdelt", context: cacheContext, value: fetchedGDELT)
+            }
+            if let fetchedUCDP {
+                ucdpConflicts = fetchedUCDP
+                writeCache(bucket: "ucdp", context: cacheContext, value: fetchedUCDP)
+            }
+
+            if let fetchedGPSJam {
+                gpsJammingCells = fetchedGPSJam
+                if !fetchedGPSJam.isEmpty {
+                    writeCache(bucket: "gpsJam", context: cacheContext, value: fetchedGPSJam)
+                }
+            }
+            if let fetchedBases {
+                militaryBases = fetchedBases
+                writeCache(bucket: "militaryBases", context: cacheContext, value: fetchedBases)
+            }
+            sectionLoadState[.conflictSecurity] = (newGdeltFailed && newUcdpFailed && fetchedGPSJam == nil) ? .failed : .fresh
+        }
+
+        if shouldRefreshCyber {
+            sectionLoadState[.cyberThreats] = .refreshing
+            async let c2Task: [FeodoC2Server]? = safeCall { try await self.service.c2Servers() }
+            async let urlhausTask: [URLhausEntry]? = safeCall { try await self.service.maliciousURLs() }
+            async let c2IntelTask: [C2IntelIOC]? = safeCall { try await self.service.c2Intel() }
+
+            let fetchedC2 = await c2Task
+            let fetchedURLhaus = await urlhausTask
+            let fetchedC2Intel = await c2IntelTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            let newCyberIntelFailed = fetchedC2 == nil || fetchedURLhaus == nil || fetchedC2Intel == nil
+
+            // Final guard before mutating state: ensure we're still the current version
+            guard isCurrentVersion(version) else { return }
+
+            cyberIntelFailed = newCyberIntelFailed
+            if let fetchedC2 {
+                c2Servers = fetchedC2
+                writeCache(bucket: "c2Servers", context: cacheContext, value: fetchedC2)
+            }
+            if let fetchedURLhaus {
+                maliciousURLs = fetchedURLhaus
+                writeCache(bucket: "maliciousURLs", context: cacheContext, value: fetchedURLhaus)
+            }
+            if let fetchedC2Intel {
+                c2IntelIndicators = fetchedC2Intel
+                writeCache(bucket: "c2Intel", context: cacheContext, value: fetchedC2Intel)
+            }
+            sectionLoadState[.cyberThreats] = newCyberIntelFailed ? .failed : .fresh
+        }
+
+        if shouldRefreshMarket {
+            sectionLoadState[.market] = .refreshing
+            async let indicesTask: [YahooQuote]? = safeCall { try await self.service.marketQuotes(indices: [.sp500, .nasdaq, .vix]) }
+            async let cryptoTask: [CryptoAsset]? = safeCall { try await self.service.cryptoAssets(coins: [.bitcoin, .ethereum, .solana]) }
+            let fetchedIndices = await indicesTask
+            let fetchedCrypto = await cryptoTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            async let fearGreedTask: FearGreedIndex? = safeCall { try await self.service.fearGreedIndex() }
+            async let stablecoinTask: [StablecoinHealth]? = safeCall { try await self.service.stablecoinHealth() }
+            let fetchedFearGreed = await fearGreedTask
+            let fetchedStablecoins = await stablecoinTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            async let policyRatesTask: [BISPolicyRate]? = safeCall { try await self.service.policyRates() }
+            async let hashrateTask: BitcoinHashrate? = safeCall { try await self.service.bitcoinHashrate() }
+            let fetchedPolicyRates = await policyRatesTask
+            let fetchedHashrate = await hashrateTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            let newMarketDataFailed = fetchedIndices == nil
+                || fetchedIndices?.isEmpty == true
+                || fetchedCrypto == nil
+                || fetchedCrypto?.isEmpty == true
+                || fetchedStablecoins == nil
+                || fetchedStablecoins?.isEmpty == true
+                || fetchedPolicyRates?.isEmpty == true
+                || fetchedHashrate == nil
+
+            // Final guard before mutating state: ensure we're still the current version
+            guard isCurrentVersion(version) else { return }
+
+            marketDataFailed = newMarketDataFailed
+
+            if let fetchedIndices {
+                marketIndices = fetchedIndices
+                writeCache(bucket: "marketIndices", context: cacheContext, value: fetchedIndices)
+            }
+            if let fetchedCrypto {
+                cryptoAssets = fetchedCrypto
+                writeCache(bucket: "cryptoAssets", context: cacheContext, value: fetchedCrypto)
+            }
+            if let fetchedFearGreed {
+                fearGreed = fetchedFearGreed
+                writeCache(bucket: "fearGreed", context: cacheContext, value: fetchedFearGreed)
+            }
+            if let fetchedStablecoins {
+                stablecoinHealth = fetchedStablecoins
+                writeCache(bucket: "stablecoins", context: cacheContext, value: fetchedStablecoins)
+            }
+            if let fetchedPolicyRates {
+                policyRates = fetchedPolicyRates
+                writeCache(bucket: "policyRates", context: cacheContext, value: fetchedPolicyRates)
+            }
+            if let fetchedHashrate {
+                bitcoinHashrate = fetchedHashrate
+                writeCache(bucket: "bitcoinHashrate", context: cacheContext, value: fetchedHashrate)
+            }
+            sectionLoadState[.market] = marketDataFailed ? .failed : .fresh
+        }
+
+        if shouldRefreshInfrastructure {
+            sectionLoadState[.infrastructure] = .refreshing
+            async let connectivityTask: [CloudflareRadarData]? = safeCall { try await self.service.internetConnectivity() }
+            async let displacementTask: [DisplacementData]? = safeCall { try await self.service.displacementData() }
+            let fetchedConnectivity = await connectivityTask
+            let fetchedDisplacement = await displacementTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            if let fetchedConnectivity {
+                internetConnectivity = fetchedConnectivity
+                writeCache(bucket: "connectivity", context: cacheContext, value: fetchedConnectivity)
+            }
+            if let fetchedDisplacement {
+                displacementData = fetchedDisplacement
+                writeCache(bucket: "displacement", context: cacheContext, value: fetchedDisplacement)
+            }
+            sectionLoadState[.infrastructure] = (fetchedConnectivity == nil && fetchedDisplacement == nil) ? .failed : .fresh
+        }
+
+        if shouldRefreshTravelSafety {
+            sectionLoadState[.travelSafety] = .refreshing
+            async let advisoriesTask: [TravelAdvisory]? = safeCall { try await self.service.travelAdvisories() }
+            async let airportsTask: [AirportDelay]? = safeCall { try await self.service.airportDelays() }
+            let fetchedAdvisories = await advisoriesTask
+            let fetchedAirports = await airportsTask
+            if !isCurrentVersion(version) || Task.isCancelled { return }
+
+            let newTravelSafetyFailed = fetchedAdvisories == nil || fetchedAirports == nil
+
+            // Final guard before mutating state: ensure we're still the current version
+            guard isCurrentVersion(version) else { return }
+
+            travelSafetyFailed = newTravelSafetyFailed
+            if let fetchedAdvisories {
+                travelAdvisories = fetchedAdvisories
+                writeCache(bucket: "advisories", context: cacheContext, value: fetchedAdvisories)
+            }
+            if let fetchedAirports {
+                airportDelays = fetchedAirports
+                writeCache(bucket: "airports", context: cacheContext, value: fetchedAirports)
+            }
+            sectionLoadState[.travelSafety] = newTravelSafetyFailed ? .failed : .fresh
+        }
+
         if snapshotFailed && headlinesFailed && naturalEventsFailed && militaryOverviewFailed {
             snapshot = .empty
             headlines = []
             naturalEvents = []
             militaryOverview = .empty
+            sectionLoadState[.core] = .failed
+        }
+    }
+
+    private func isCurrentVersion(_ version: Int) -> Bool {
+        refreshVersion == version && refreshTask != nil
+    }
+
+    private func cacheContext(for query: FeedQuery) -> String {
+        "\(query.variant)-\(query.region)-\(query.window)"
+    }
+
+    private func makeCacheKey(bucket: String, context: String) -> CacheKey {
+        CacheKey(bucket: bucket, context: context)
+    }
+
+    private func hasAnySectionCache(buckets: [String], context: String, maxAge: TimeInterval) -> Bool {
+        buckets.contains { bucket in
+            let key = makeCacheKey(bucket: bucket, context: context)
+            guard let entry = cacheByKey[key] else { return false }
+            return Date().timeIntervalSince(entry.fetchedAt) <= maxAge
+        }
+    }
+
+    private func hasAllSectionCache(buckets: [String], context: String, maxAge: TimeInterval) -> Bool {
+        buckets.allSatisfy { bucket in
+            let key = makeCacheKey(bucket: bucket, context: context)
+            guard let entry = cacheByKey[key] else { return false }
+            return Date().timeIntervalSince(entry.fetchedAt) <= maxAge
+        }
+    }
+
+    private func writeCache<T>(bucket: String, context: String, value: T) {
+        cacheByKey[makeCacheKey(bucket: bucket, context: context)] = CacheEntry(
+            fetchedAt: .now,
+            payload: value
+        )
+    }
+
+    private func readCached<T>(bucket: String, context: String, maxAge: TimeInterval) -> T? {
+        let key = makeCacheKey(bucket: bucket, context: context)
+        guard let entry = cacheByKey[key] else { return nil }
+        guard Date().timeIntervalSince(entry.fetchedAt) <= maxAge else {
+            cacheByKey.removeValue(forKey: key)
+            return nil
+        }
+        return entry.payload as? T
+    }
+
+    private func safeCall<T>(_ operation: @escaping () async throws -> T) async -> T? {
+        do {
+            return try await operation()
+        } catch {
+            return nil
         }
     }
 
@@ -377,7 +782,10 @@ struct ContentView: View {
             .navigationTitle("World Monitor")
             .task { await viewModel.refresh() }
             .onAppear { viewModel.startLiveMode() }
-            .onDisappear { viewModel.stopLiveMode() }
+            .onDisappear {
+                viewModel.cancelRefreshes()
+                viewModel.stopLiveMode()
+            }
         }
     }
 
@@ -578,7 +986,7 @@ struct ContentView: View {
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color(.secondarySystemBackground), in: Capsule())
+                            .background(viewModel.layerVisibility.isVisible(layer) ? layer.tint.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                         }
                     }
 
@@ -597,7 +1005,7 @@ struct ContentView: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .background(viewModel.showGPSJamming ? Color.orange.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                     }
 
                     Button {
@@ -614,7 +1022,7 @@ struct ContentView: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .background(viewModel.showMilitaryBases ? Color.purple.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                     }
 
                     Button {
@@ -631,7 +1039,7 @@ struct ContentView: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .background(viewModel.showConflictEvents ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                     }
 
                     // Cyber Threats Toggle
@@ -649,7 +1057,7 @@ struct ContentView: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .background(viewModel.showCyberThreats ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                     }
                 }
             }
@@ -698,36 +1106,88 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 if viewModel.isRefreshing {
-                    ProgressView().scaleEffect(0.75)
+                    HStack(spacing: 8) {
+                        ProgressView().scaleEffect(0.75)
+                        Text("Refreshing")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
-            if viewModel.hasError {
+            HStack(spacing: 10) {
+                ForEach(DashboardSection.allCases, id: \.self) { section in
+                    if let state = viewModel.sectionLoadState[section],
+                       state == .stale || state == .refreshing || state == .failed {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(state.color)
+                                .frame(width: 6, height: 6)
+                            Text(section.title)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                    }
+                }
+            }
+
+            let anyError = viewModel.hasError || viewModel.gdeltFailed || viewModel.ucdpFailed || viewModel.cyberIntelFailed || viewModel.marketDataFailed || viewModel.travelSafetyFailed
+            if anyError {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Live data partially unavailable.")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.red)
 
-                    HStack(spacing: 8) {
-                        if viewModel.snapshotFailed {
-                            Label("Snapshot", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                        if viewModel.headlinesFailed {
-                            Label("Headlines", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                        if viewModel.naturalEventsFailed {
-                            Label("Events", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                        if viewModel.militaryOverviewFailed {
-                            Label("Military", systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            if viewModel.snapshotFailed {
+                                Label("Snapshot", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.headlinesFailed {
+                                Label("Headlines", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.naturalEventsFailed {
+                                Label("Events", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.militaryOverviewFailed {
+                                Label("Military", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.gdeltFailed {
+                                Label("GDELT", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.ucdpFailed {
+                                Label("UCDP", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.cyberIntelFailed {
+                                Label("Cyber", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.marketDataFailed {
+                                Label("Market", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            if viewModel.travelSafetyFailed {
+                                Label("Travel", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
                 }
@@ -919,6 +1379,10 @@ struct ContentView: View {
                         }
                     }
                 }
+            } else if !viewModel.ucdpFailed {
+                Label("No active critical conflicts", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
 
             Divider()
@@ -941,6 +1405,10 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            } else if !viewModel.gdeltFailed {
+                Label("No recent high-severity events", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
         }
         .padding(14)
@@ -996,6 +1464,10 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            } else if !viewModel.cyberIntelFailed {
+                Label("No active high-risk C2 servers", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
         }
         .padding(14)
@@ -1027,6 +1499,10 @@ struct ContentView: View {
                     Spacer()
                 }
                 .foregroundStyle(.orange)
+            } else if !viewModel.travelSafetyFailed {
+                Label("No significant delays currently reported.", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
 
             Divider()
@@ -1037,6 +1513,10 @@ struct ContentView: View {
                 Text("Do Not Travel: \(doNotTravel.prefix(3).map { $0.countryCode }.joined(separator: ", "))")
                     .font(.caption)
                     .foregroundStyle(.red)
+            } else if !viewModel.travelSafetyFailed {
+                Label("No new 'Do Not Travel' advisories.", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
         }
         .padding(14)
