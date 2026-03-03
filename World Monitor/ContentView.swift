@@ -260,9 +260,14 @@ final class DashboardViewModel: ObservableObject {
             let stillCurrent = isCurrentVersion(version)
             if stillCurrent {
                 isRefreshing = false
-            }
-            if stillCurrent {
                 refreshTask = nil
+            } else {
+                // Reset section states to idle when task becomes stale or is cancelled
+                for section in DashboardSection.allCases {
+                    if sectionLoadState[section] == .refreshing {
+                        sectionLoadState[section] = .idle
+                    }
+                }
             }
         }
 
@@ -457,7 +462,7 @@ final class DashboardViewModel: ObservableObject {
             let fetchedUCDP = await ucdpTask
 
             async let gpsJamTask: [GPSJamHexCell]? = safeCall { try await self.service.gpsJammingData(region: nil) }
-            async let basesTask: [MilitaryBase]? = safeCall { await self.service.militaryBases(for: selectedRegion) }
+            async let basesTask: [MilitaryBase]? = safeCall { await self.service.militaryBases(for: self.selectedRegion) }
             let fetchedGPSJam = await gpsJamTask
             let fetchedBases = await basesTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
