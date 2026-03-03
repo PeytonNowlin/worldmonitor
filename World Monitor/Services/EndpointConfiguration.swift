@@ -236,13 +236,6 @@ enum EndpointConfigurations {
         case .unOchaHAPI: return unOchaHAPI
         case .usTravelAdvisory: return usTravelAdvisory
         case .faaAirport: return faaAirport
-        case .rssAggregation:
-            // RSS feeds have varying URLs, use default
-            return EndpointConfiguration(
-                baseURL: URL(string: "https://example.com")!,
-                timeout: 30,
-                retryPolicy: .default
-            )
         }
     }
 }

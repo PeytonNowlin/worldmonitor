@@ -43,10 +43,7 @@ final class DashboardViewModel: ObservableObject {
     // MARK: - Market Data
     @Published var marketIndices: [YahooQuote] = []
     @Published var cryptoAssets: [CryptoAsset] = []
-    @Published var stablecoinHealth: [StablecoinHealth] = []
     @Published var fearGreed: FearGreedIndex?
-    @Published var bitcoinHashrate: BitcoinHashrate?
-    @Published var policyRates: [BISPolicyRate] = []
 
     // MARK: - Infrastructure Data
     @Published var internetConnectivity: [CloudflareRadarData] = []

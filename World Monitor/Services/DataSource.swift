@@ -38,9 +38,6 @@ enum DataSource: String, CaseIterable, Identifiable {
     case usTravelAdvisory
     case faaAirport
     
-    // MARK: - News (Optional)
-    case rssAggregation
-    
     var id: String { rawValue }
     
     /// Display name for the data source
@@ -67,7 +64,6 @@ enum DataSource: String, CaseIterable, Identifiable {
         case .unOchaHAPI: return "UN OCHA HAPI"
         case .usTravelAdvisory: return "US Travel Advisories"
         case .faaAirport: return "FAA Airport Status"
-        case .rssAggregation: return "RSS Feeds"
         }
     }
     
@@ -88,8 +84,6 @@ enum DataSource: String, CaseIterable, Identifiable {
             return .infrastructure
         case .usTravelAdvisory, .faaAirport:
             return .travelSafety
-        case .rssAggregation:
-            return .news
         }
     }
     
@@ -117,7 +111,6 @@ enum DataSource: String, CaseIterable, Identifiable {
         case .unOchaHAPI: return 86400   // 24 hours
         case .usTravelAdvisory: return 21600 // 6 hours
         case .faaAirport: return 300  // 5 minutes
-        case .rssAggregation: return 300  // 5 minutes
         }
     }
     
@@ -135,5 +128,4 @@ enum DataSourceCategory: String, CaseIterable {
     case economicMarkets = "Economic & Markets"
     case infrastructure = "Infrastructure"
     case travelSafety = "Travel & Safety"
-    case news = "News"
 }

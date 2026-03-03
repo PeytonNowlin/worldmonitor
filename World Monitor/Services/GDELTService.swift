@@ -108,43 +108,6 @@ actor GDELTService {
         }
     }
     
-    /// Fetch GKG (Global Knowledge Graph) articles
-    func fetchGKGArticles(
-        themes: [String]? = nil,
-        days: Int = 1,
-        region: RegionPreset? = nil
-    ) async throws -> [GDELTGKGArticle] {
-        let calendar = Calendar.current
-        let endDate = Date()
-        let startDate = calendar.date(byAdding: .day, value: -days, to: endDate)!
-        
-        let queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "QUERY", value: themes?.joined(separator: ";") ?? ""),
-            URLQueryItem(name: "STARTDATETIME", value: formatDate(startDate)),
-            URLQueryItem(name: "ENDDATETIME", value: formatDate(endDate)),
-            URLQueryItem(name: "MAXROWS", value: "250"),
-            URLQueryItem(name: "FORMAT", value: "JSON")
-        ]
-        
-        var components = URLComponents(
-            url: config.baseURL.appendingPathComponent("/api/v1/gkg/gkg"),
-            resolvingAgainstBaseURL: true
-        )
-        components?.queryItems = queryItems
-        
-        guard let url = components?.url else {
-            throw HTTPClientError.invalidURL
-        }
-        
-        // Note: GKG API returns CSV-like data, this is a simplified version
-        // In production, you'd need a CSV parser for the actual GKG response
-        _ = try await httpClient.fetchData(url: url, source: .gdelt)
-        
-        // Parse the response (GKG returns tabular data, not JSON)
-        // This is a placeholder - real implementation would parse the actual format
-        return []
-    }
-    
     /// Get trending themes from recent events
     func fetchTrendingThemes(days: Int = 2) async throws -> [(theme: String, count: Int)] {
         let events = try await fetchRecentSignificantEvents(days: days, minMentions: 1)
@@ -164,12 +127,6 @@ actor GDELTService {
     }
     
     // MARK: - Private Methods
-    
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: date)
-    }
     
     private func boundsForRegion(_ region: RegionPreset) -> (center: CLLocationCoordinate2D, radiusKm: Double)? {
         switch region {

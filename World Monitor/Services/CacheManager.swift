@@ -134,26 +134,6 @@ actor CacheManager {
         return nil
     }
     
-    /// Check if cache entry exists and is fresh
-    func isFresh(
-        source: DataSource,
-        region: String? = nil,
-        maxAge: TimeInterval? = nil
-    ) -> Bool {
-        let key = cacheKey(for: source, region: region)
-        let ttl = maxAge ?? source.defaultCacheTTL
-        
-        if let entry = memoryCache[key] as? CacheEntry<AnyCodable> {
-            return Date().timeIntervalSince(entry.timestamp) <= ttl
-        }
-        
-        if let entry: CacheEntry<AnyCodable> = loadFromPersistence(key: key) {
-            return Date().timeIntervalSince(entry.timestamp) <= ttl
-        }
-        
-        return false
-    }
-    
     // MARK: - Private Methods
     
     private func cacheKey(for source: DataSource, region: String?) -> String {
@@ -262,26 +242,6 @@ struct CacheStats {
 enum CacheTier {
     case memory
     case disk
-}
-
-// MARK: - Helper Types
-
-/// Type erasure helper for cache operations
-private struct AnyCodable: Codable {
-    let value: Any
-    
-    init<T: Codable>(_ value: T) {
-        self.value = value
-    }
-    
-    init(from decoder: Decoder) throws {
-        // This is a placeholder - actual decoding happens with concrete types
-        self.value = ()
-    }
-    
-    func encode(to encoder: Encoder) throws {
-        // This is a placeholder - actual encoding happens with concrete types
-    }
 }
 
 // MARK: - Convenience Extensions
