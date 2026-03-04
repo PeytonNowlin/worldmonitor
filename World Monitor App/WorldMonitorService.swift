@@ -81,7 +81,7 @@ struct LiveWorldMonitorService: WorldMonitorService {
 
     func snapshot(for query: FeedQuery) async throws -> MonitoringSnapshot {
         let allEvents = try await loadAllEvents()
-        let events = filteredEvents(for: query.region, in: allEvents)
+        let events = filteredEvents(for: query, in: allEvents)
         let now = Date()
         let windowStart = now.addingTimeInterval(-query.window.interval)
         let newEvents = events.filter { $0.occurredAt >= windowStart }
@@ -121,7 +121,7 @@ struct LiveWorldMonitorService: WorldMonitorService {
     }
 
     func headlines(for query: FeedQuery) async throws -> [FeedItem] {
-        let events = filteredEvents(for: query.region, in: try await loadAllEvents())
+        let events = filteredEvents(for: query, in: try await loadAllEvents())
             .sorted { $0.occurredAt > $1.occurredAt }
         let selected = selectBalancedHeadlineEvents(from: events, limit: 12)
 
@@ -193,11 +193,13 @@ struct LiveWorldMonitorService: WorldMonitorService {
     }
 
     func naturalEvents(for query: FeedQuery) async throws -> [NaturalEvent] {
-        filteredEvents(for: query.region, in: try await loadAllEvents())
+        filteredEvents(for: query, in: try await loadAllEvents())
     }
 
     func militaryOverview(for query: FeedQuery) async throws -> MilitaryOverview {
-        if let cached = await Self.militaryCache.read(regionKey: query.region.rawValue, maxAge: 120) {
+        let cacheKey = "\(query.region.rawValue)|\(query.variant.rawValue)"
+
+        if let cached = await Self.militaryCache.read(regionKey: cacheKey, maxAge: 120) {
             return cached
         }
 
@@ -219,11 +221,11 @@ struct LiveWorldMonitorService: WorldMonitorService {
         )
 
         if !overview.flights.isEmpty || !overview.vessels.isEmpty || overview.basesInView > 0 {
-            await Self.militaryCache.write(regionKey: query.region.rawValue, overview: overview)
+            await Self.militaryCache.write(regionKey: cacheKey, overview: overview)
             return overview
         }
 
-        if let stale = await Self.militaryCache.read(regionKey: query.region.rawValue, maxAge: .infinity) {
+        if let stale = await Self.militaryCache.read(regionKey: cacheKey, maxAge: .infinity) {
             return stale
         }
 
@@ -258,6 +260,46 @@ struct LiveWorldMonitorService: WorldMonitorService {
         }
 
         return []
+    }
+
+    private func filteredEvents(for query: FeedQuery, in events: [NaturalEvent]) -> [NaturalEvent] {
+        let regionFiltered = filteredEvents(for: query.region, in: events)
+        let variantFiltered = regionFiltered.filter { isRelevant(event: $0, for: query.variant) }
+
+        return variantFiltered.isEmpty ? regionFiltered : variantFiltered
+    }
+
+    private func isRelevant(event: NaturalEvent, for variant: MonitorVariant) -> Bool {
+        switch variant {
+        case .world:
+            return true
+        case .tech:
+            return isTechRelevant(event.title) || isTechRelevant(event.source)
+        case .finance:
+            return isFinanceRelevant(event.title) || isFinanceRelevant(event.source)
+        }
+    }
+
+    private func isTechRelevant(_ text: String) -> Bool {
+        let normalized = text.lowercased()
+        let keywords = [
+            "satellite", "internet", "cyber", "data", "network", "outage", "telecom",
+            "power", "grid", "server", "cloud", "satcom", "cable", "fiber", "5g",
+            "drone", "aircraft", "launch", "rocket", "space", "energy infrastructure"
+        ]
+
+        return keywords.contains(where: normalized.contains)
+    }
+
+    private func isFinanceRelevant(_ text: String) -> Bool {
+        let normalized = text.lowercased()
+        let keywords = [
+            "market", "finance", "bank", "oil", "gas", "port", "shipping", "trade",
+            "currency", "stock", "exchange", "crypto", "bitcoin", "ethereum",
+            "inflation", "supply chain", "commodity", "cargo", "harbor", "port"
+        ]
+
+        return keywords.contains(where: normalized.contains)
     }
 
     private func filteredEvents(for region: RegionPreset, in events: [NaturalEvent]) -> [NaturalEvent] {

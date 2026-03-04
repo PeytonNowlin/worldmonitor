@@ -82,7 +82,9 @@ actor CloudflareRadarService {
         let degraded = data.filter { $0.status == .degraded }.count
         let severe = data.filter { $0.status == .severe }.count
         
-        let avgScore = data.map { $0.connectivityScore }.reduce(0, +) / Double(data.count)
+        let avgScore = data.isEmpty
+            ? 0
+            : data.map { $0.connectivityScore }.reduce(0, +) / Double(data.count)
         
         let worstCountries = data
             .sorted { $0.connectivityScore < $1.connectivityScore }
