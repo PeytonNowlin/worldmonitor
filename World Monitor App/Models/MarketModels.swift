@@ -342,29 +342,6 @@ struct FearGreedDataPoint: Codable {
     let timeUntilUpdate: String
 }
 
-// MARK: - Mempool.space Models
-
-/// Bitcoin hashrate data
-struct BitcoinHashrate: Codable {
-    let currentHashrate: Double // EH/s
-    let currentDifficulty: Double
-    let difficultyChange: Double // Percentage
-    let difficultyEpoch: Int
-    let remainingBlocksToDifficultyAdjustment: Int
-    let estimatedDifficultyChange: Double
-    let timestamp: Date
-    
-    enum CodingKeys: String, CodingKey {
-        case currentHashrate = "currentHashrate"
-        case currentDifficulty = "currentDifficulty"
-        case difficultyChange = "difficultyChange"
-        case difficultyEpoch = "difficultyEpoch"
-        case remainingBlocksToDifficultyAdjustment
-        case estimatedDifficultyChange
-        case timestamp
-    }
-}
-
 /// Bitcoin network statistics
 struct BitcoinNetworkStats: Codable {
     let hashrate: Double
@@ -384,7 +361,6 @@ struct MarketSummary: Codable {
     let crypto: [CryptoAsset]
     let stablecoins: [StablecoinHealth]
     let fearGreed: FearGreedIndex?
-    let bitcoinHashrate: BitcoinHashrate?
     let bisRates: [BISPolicyRate]
     
     /// Overall market sentiment

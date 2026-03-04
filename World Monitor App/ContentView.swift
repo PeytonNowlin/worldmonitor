@@ -106,7 +106,6 @@ final class DashboardViewModel: ObservableObject {
     @Published var cryptoAssets: [CryptoAsset] = []
     @Published var fearGreed: FearGreedIndex?
     @Published var policyRates: [BISPolicyRate] = []
-    @Published var bitcoinHashrate: BitcoinHashrate?
 
     // MARK: - Infrastructure Data
     @Published var internetConnectivity: [CloudflareRadarData] = []
@@ -282,7 +281,7 @@ final class DashboardViewModel: ObservableObject {
         let coreBuckets = ["snapshot", "headlines", "naturalEvents", "militaryOverview"]
         let conflictBuckets = ["militaryBases"]
         let cyberBuckets = ["c2Servers"]
-        let marketBuckets = ["marketIndices", "cryptoAssets", "fearGreed", "policyRates", "bitcoinHashrate"]
+        let marketBuckets = ["marketIndices", "cryptoAssets", "fearGreed", "policyRates"]
         let infrastructureBuckets = ["connectivity", "displacement"]
         let travelBuckets = ["advisories"]
 
@@ -343,9 +342,6 @@ final class DashboardViewModel: ObservableObject {
         }
         if let cachedPolicyRates: [BISPolicyRate] = readCached(bucket: "policyRates", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             policyRates = cachedPolicyRates
-        }
-        if let cachedBitcoinHashrate: BitcoinHashrate = readCached(bucket: "bitcoinHashrate", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            bitcoinHashrate = cachedBitcoinHashrate
         }
         if let cachedConnectivity: [CloudflareRadarData] = readCached(bucket: "connectivity", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             internetConnectivity = cachedConnectivity
@@ -484,9 +480,7 @@ final class DashboardViewModel: ObservableObject {
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
             async let policyRatesTask: [BISPolicyRate]? = safeCall { try await self.service.policyRates() }
-            async let hashrateTask: BitcoinHashrate? = safeCall { try await self.service.bitcoinHashrate() }
             let fetchedPolicyRates = await policyRatesTask
-            let fetchedHashrate = await hashrateTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
             let hasIndices = !(fetchedIndices?.isEmpty ?? true)
@@ -513,10 +507,6 @@ final class DashboardViewModel: ObservableObject {
             if let fetchedPolicyRates {
                 policyRates = fetchedPolicyRates
                 writeCache(bucket: "policyRates", context: cacheContext, value: fetchedPolicyRates)
-            }
-            if let fetchedHashrate {
-                bitcoinHashrate = fetchedHashrate
-                writeCache(bucket: "bitcoinHashrate", context: cacheContext, value: fetchedHashrate)
             }
             sectionLoadState[.market] = marketDataFailed ? .failed : .fresh
         }
@@ -1218,32 +1208,6 @@ struct ContentView: View {
 
             Divider()
 
-            // Bitcoin Hashrate
-            if let hashrate = viewModel.bitcoinHashrate {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Bitcoin Network")
-                        .font(.caption.weight(.semibold))
-
-                    HStack {
-                        Text("Hashrate")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2f EH/s", hashrate.currentHashrate))
-                            .font(.caption2.monospaced())
-                    }
-
-                    HStack {
-                        Text("Difficulty")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(String(format: "%.2f", hashrate.currentDifficulty))
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(hashrateColor(hashrate.difficultyChange))
-                    }
-                }
-            }
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -1390,13 +1354,6 @@ struct ContentView: View {
         case .greed: return .green
         case .extremeGreed: return .green
         }
-    }
-
-    private func hashrateColor(_ change: Double) -> Color {
-        if change >= 0 {
-            return .green
-        }
-        return .red
     }
 
     private func color(for event: NaturalEvent) -> Color {

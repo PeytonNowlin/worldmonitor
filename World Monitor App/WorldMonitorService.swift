@@ -28,7 +28,6 @@ protocol WorldMonitorService {
     func fearGreedIndex() async throws -> FearGreedIndex
     func stablecoinHealth() async throws -> [StablecoinHealth]
     func policyRates() async throws -> [BISPolicyRate]
-    func bitcoinHashrate() async throws -> BitcoinHashrate
 
     // MARK: - Infrastructure
     func internetConnectivity() async throws -> [CloudflareRadarData]
@@ -812,10 +811,6 @@ struct LiveWorldMonitorService: WorldMonitorService {
 
     func policyRates() async throws -> [BISPolicyRate] {
         return try await BISService.shared.fetchMajorCentralBankRates()
-    }
-
-    func bitcoinHashrate() async throws -> BitcoinHashrate {
-        return try await MempoolService.shared.fetchHashrate()
     }
 
     func internetConnectivity() async throws -> [CloudflareRadarData] {
