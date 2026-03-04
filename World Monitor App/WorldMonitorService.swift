@@ -266,7 +266,7 @@ struct LiveWorldMonitorService: WorldMonitorService {
         let regionFiltered = filteredEvents(for: query.region, in: events)
         let variantFiltered = regionFiltered.filter { isRelevant(event: $0, for: query.variant) }
 
-        return variantFiltered.isEmpty ? regionFiltered : variantFiltered
+        return variantFiltered
     }
 
     private func isRelevant(event: NaturalEvent, for variant: MonitorVariant) -> Bool {
