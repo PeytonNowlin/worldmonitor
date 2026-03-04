@@ -50,7 +50,6 @@ actor CoinGeckoService {
             }
             
             let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
             decoder.dateDecodingStrategy = .iso8601
             
             let assets: [CryptoAsset] = try await self.httpClient.fetch(
@@ -96,7 +95,6 @@ actor CoinGeckoService {
             }
 
             let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
 
             let coins: [StablecoinMarketCoin] = try await self.httpClient.fetch(
                 url: url,

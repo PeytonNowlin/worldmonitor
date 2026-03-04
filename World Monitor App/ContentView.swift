@@ -83,6 +83,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var sectionLoadState: [DashboardSection: DashboardSectionLoadState] = Dictionary(
         uniqueKeysWithValues: DashboardSection.allCases.map { ($0, .idle) }
     )
+    @Published var isManualRefreshDisabled = false
 
     // Track individual data source failures for partial error detection
     @Published var snapshotFailed = false
@@ -211,6 +212,18 @@ final class DashboardViewModel: ObservableObject {
     func setWindow(_ window: TimeWindow) {
         selectedWindow = window
         Task { await refresh() }
+    }
+
+    func triggerManualRefresh() {
+        guard !isManualRefreshDisabled else { return }
+        isManualRefreshDisabled = true
+        Task { await refresh() }
+        Task {
+            try? await Task.sleep(for: .seconds(120))
+            await MainActor.run {
+                self.isManualRefreshDisabled = false
+            }
+        }
     }
 
     func refresh() async {
@@ -434,7 +447,8 @@ final class DashboardViewModel: ObservableObject {
                 militaryBases = fetchedBases
                 writeCache(bucket: "militaryBases", context: cacheContext, value: fetchedBases)
             }
-            sectionLoadState[.conflictSecurity] = fetchedBases == nil ? .failed : .fresh
+            let conflictSecurityFailed = fetchedBases?.isEmpty ?? true
+            sectionLoadState[.conflictSecurity] = conflictSecurityFailed ? .failed : .fresh
         }
 
         if shouldRefreshCyber {
@@ -743,12 +757,17 @@ struct ContentView: View {
                     .font(.title3.weight(.semibold))
                 Spacer()
                 HStack(spacing: 8) {
-                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.green.opacity(0.15), in: Capsule())
-                        .foregroundStyle(.green)
+                    Button(action: {
+                        viewModel.triggerManualRefresh()
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(viewModel.isManualRefreshDisabled ? Color.gray.opacity(0.15) : Color.blue.opacity(0.15), in: Capsule())
+                            .foregroundStyle(viewModel.isManualRefreshDisabled ? Color.gray : Color.blue)
+                    }
+                    .disabled(viewModel.isManualRefreshDisabled || viewModel.isRefreshing)
 
                     Text("Updated: \(viewModel.snapshot.lastRefreshed.formatted(date: .omitted, time: .shortened))")
                         .font(.caption)
