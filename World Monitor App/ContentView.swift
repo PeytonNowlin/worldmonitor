@@ -1602,9 +1602,47 @@ struct SettingsView: View {
                         viewModel.restartTicker()
                     }
                 }
+                
+                Section(header: Text("About")) {
+                    NavigationLink("Open Source Licenses") {
+                        OpenSourceLicenseView()
+                    }
+                }
             }
             .navigationTitle("Settings")
         }
+    }
+}
+
+struct OpenSourceLicenseView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("World Monitor — Real-time global intelligence dashboard")
+                    .font(.headline)
+                
+                Text("Copyright (C) 2024-2026 Elie Habib")
+                
+                Text("""
+                This program is free software: you can redistribute it and/or modify
+                it under the terms of the GNU Affero General Public License as published by
+                the Free Software Foundation, either version 3 of the License, or
+                (at your option) any later version.
+                
+                                    GNU AFFERO GENERAL PUBLIC LICENSE
+                                       Version 3, 19 November 2007
+                """)
+                .font(.footnote)
+                
+                if let url = URL(string: "https://github.com/koala73/worldmonitor") {
+                    Link("https://github.com/koala73/worldmonitor", destination: url)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle("Open Source")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

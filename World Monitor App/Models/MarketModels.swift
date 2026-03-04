@@ -344,8 +344,6 @@ struct FearGreedDataPoint: Codable {
 
 /// Bitcoin network statistics
 struct BitcoinNetworkStats: Codable {
-    let hashrate: Double
-    let difficulty: Double
     let mempoolSize: Int // MB
     let unconfirmedTxs: Int
     let avgFeeRate: Double // sats/vByte

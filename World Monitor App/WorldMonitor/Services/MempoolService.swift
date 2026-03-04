@@ -27,8 +27,6 @@ actor MempoolService {
             let mempoolData = try decoder.decode(MempoolStatsResponse.self, from: data)
             
             return BitcoinNetworkStats(
-                hashrate: 0,
-                difficulty: 0,
                 mempoolSize: mempoolData.vsize / 1_000_000, // Convert to MB
                 unconfirmedTxs: mempoolData.count,
                 avgFeeRate: mempoolData.feeHistogram.first?.avgFee ?? 0,
