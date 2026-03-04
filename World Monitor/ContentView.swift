@@ -2,6 +2,22 @@ import SwiftUI
 import Combine
 import MapKit
 
+enum AppRefreshRate: Int, CaseIterable, Identifiable {
+    case oneMinute = 60
+    case fiveMinutes = 300
+    case tenMinutes = 600
+    
+    var id: Int { rawValue }
+    
+    var title: String {
+        switch self {
+        case .oneMinute: return "1 Minute"
+        case .fiveMinutes: return "5 Minutes"
+        case .tenMinutes: return "10 Minutes"
+        }
+    }
+}
+
 enum DashboardSection: String, CaseIterable {
     case core
     case conflictSecurity
@@ -696,18 +712,28 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    func startLiveMode() {
-        guard !liveEnabled else { return }
-        liveEnabled = true
+    private var currentRefreshRate: AppRefreshRate {
+        let rawValue = UserDefaults.standard.integer(forKey: "appRefreshRate")
+        return AppRefreshRate(rawValue: rawValue) ?? .oneMinute
+    }
+
+    func restartTicker() {
         tickerTask?.cancel()
+        if !liveEnabled { return }
         tickerTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
+                try? await Task.sleep(for: .seconds(self.currentRefreshRate.rawValue))
                 if Task.isCancelled { return }
                 await refresh()
             }
         }
+    }
+
+    func startLiveMode() {
+        guard !liveEnabled else { return }
+        liveEnabled = true
+        restartTicker()
     }
 
     func stopLiveMode() {
@@ -760,6 +786,7 @@ struct ContentView: View {
             span: MKCoordinateSpan(latitudeDelta: 120, longitudeDelta: 120)
         )
     )
+    @State private var selectedTab = 0
 
     init(viewModel: DashboardViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -771,26 +798,46 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            GeometryReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        headerBar
-                        mainSurface(isWide: proxy.size.width > 900)
-                        intelligenceStrip
-                        liveFeedPanel
-                    }
-                    .padding(16)
+        TabView(selection: $selectedTab) {
+            dashboardTab
+                .tabItem {
+                    Label("Dashboard", systemImage: "chart.xyaxis.line")
                 }
-                .background(Color(.systemGroupedBackground))
+                .tag(0)
+
+            mapTab
+                .tabItem {
+                    Label("Map", systemImage: "map")
+                }
+                .tag(1)
+                
+            SettingsView(viewModel: viewModel)
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(2)
+        }
+        .task { await viewModel.refresh() }
+        .onAppear { viewModel.startLiveMode() }
+        .onDisappear {
+            viewModel.cancelRefreshes()
+            viewModel.stopLiveMode()
+        }
+    }
+
+    private var dashboardTab: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    headerBar
+                    sidePanelColumn
+                    intelligenceStrip
+                    liveFeedPanel
+                }
+                .padding(16)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("World Monitor")
-            .task { await viewModel.refresh() }
-            .onAppear { viewModel.startLiveMode() }
-            .onDisappear {
-                viewModel.cancelRefreshes()
-                viewModel.stopLiveMode()
-            }
         }
     }
 
@@ -814,7 +861,7 @@ struct ContentView: View {
                 }
             }
 
-            HStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Picker("Variant", selection: $viewModel.selectedVariant) { ForEach(MonitorVariant.allCases) { variant in
                     Text(variant.title).tag(variant)
                 }}
@@ -823,24 +870,28 @@ struct ContentView: View {
                     viewModel.setVariant(value)
                 }
 
-                Picker("Region", selection: $viewModel.selectedRegion) {
-                    ForEach(RegionPreset.allCases) { region in
-                        Text(region.title).tag(region)
+                HStack(spacing: 10) {
+                    Picker("Region", selection: $viewModel.selectedRegion) {
+                        ForEach(RegionPreset.allCases) { region in
+                            Text(region.title).tag(region)
+                        }
                     }
-                }
-                .pickerStyle(.menu)
-                .onChange(of: viewModel.selectedRegion) { _, value in
-                    viewModel.setRegion(value)
-                }
+                    .pickerStyle(.menu)
+                    .onChange(of: viewModel.selectedRegion) { _, value in
+                        viewModel.setRegion(value)
+                    }
 
-                Picker("Window", selection: $viewModel.selectedWindow) {
-                    ForEach(TimeWindow.allCases) { window in
-                        Text(window.title).tag(window)
+                    Spacer()
+
+                    Picker("Window", selection: $viewModel.selectedWindow) {
+                        ForEach(TimeWindow.allCases) { window in
+                            Text(window.title).tag(window)
+                        }
                     }
-                }
-                .pickerStyle(.menu)
-                .onChange(of: viewModel.selectedWindow) { _, value in
-                    viewModel.setWindow(value)
+                    .pickerStyle(.menu)
+                    .onChange(of: viewModel.selectedWindow) { _, value in
+                        viewModel.setWindow(value)
+                    }
                 }
             }
         }
@@ -848,34 +899,9 @@ struct ContentView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private func mainSurface(isWide: Bool) -> some View {
-        Group {
-            if isWide {
-                HStack(alignment: .top, spacing: 12) {
-                    mapPanel.frame(maxWidth: .infinity)
-                    sidePanelColumn.frame(width: 320)
-                }
-            } else {
-                VStack(spacing: 12) {
-                    mapPanel
-                    sidePanelColumn
-                }
-            }
-        }
-    }
-
-    private var mapPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Interactive World Map")
-                    .font(.headline)
-                Spacer()
-                Text("\(viewModel.layerVisibility.activeLayers.count) Layers Active")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            ZStack(alignment: .bottomLeading) {
+    private var mapTab: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
                 Map(position: $mapCameraPosition) {
                     ForEach(viewModel.visibleNaturalEvents) { event in
                         Annotation(event.title, coordinate: event.coordinate) {
@@ -907,7 +933,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    // GPS Jamming Layer
                     if viewModel.showGPSJamming {
                         ForEach(viewModel.visibleGPSJamCells) { cell in
                             Annotation("GPS Jam", coordinate: cell.coordinate) {
@@ -918,7 +943,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    // Military Bases Layer
                     if viewModel.showMilitaryBases {
                         ForEach(viewModel.visibleMilitaryBases) { base in
                             Annotation(base.name, coordinate: base.coordinate) {
@@ -929,7 +953,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    // Conflict Events Layer
                     if viewModel.showConflictEvents {
                         ForEach(viewModel.visibleGDELTEvents) { event in
                             Annotation(event.title, coordinate: event.coordinate) {
@@ -940,7 +963,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    // Cyber Threats Layer
                     if viewModel.showCyberThreats {
                         ForEach(viewModel.visibleC2Servers) { server in
                             if let coordinate = countryCoordinate(for: server.countryCode) {
@@ -957,125 +979,135 @@ struct ContentView: View {
                 .onMapCameraChange { context in
                     viewModel.visibleMapRegion = context.region
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(viewModel.snapshot.headline)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels | \(viewModel.visibleGPSJamCells.count) jamming | \(viewModel.visibleMilitaryBases.count) bases | \(viewModel.visibleGDELTEvents.count) conflicts | \(viewModel.visibleC2Servers.count) C2s")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
-                }
-                .padding(10)
-                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .padding(10)
-            }
-            .frame(height: 320)
+                VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(viewModel.snapshot.headline)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                        Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels | \(viewModel.visibleGPSJamCells.count) jamming | \(viewModel.visibleMilitaryBases.count) bases | \(viewModel.visibleGDELTEvents.count) conflicts | \(viewModel.visibleC2Servers.count) C2s")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(MapLayer.allCases) { layer in
-                        Button {
-                            viewModel.toggleLayer(layer)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(viewModel.layerVisibility.isVisible(layer) ? layer.tint : Color.secondary)
-                                    .frame(width: 8, height: 8)
-                                Text(layer.title)
-                                    .font(.caption2)
-                                    .lineLimit(1)
+                    VStack(spacing: 12) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(MapLayer.allCases) { layer in
+                                    Button {
+                                        viewModel.toggleLayer(layer)
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(viewModel.layerVisibility.isVisible(layer) ? layer.tint : Color.secondary)
+                                                .frame(width: 8, height: 8)
+                                            Text(layer.title)
+                                                .font(.caption2)
+                                                .lineLimit(1)
+                                        }
+                                        .fixedSize(horizontal: true, vertical: false)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(viewModel.layerVisibility.isVisible(layer) ? layer.tint.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                                    }
+                                }
+
+                                Button {
+                                    viewModel.showGPSJamming.toggle()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text("GPS Jamming")
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(viewModel.showGPSJamming ? Color.orange.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                                }
+
+                                Button {
+                                    viewModel.showMilitaryBases.toggle()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(viewModel.showMilitaryBases ? .purple : Color.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text("Bases")
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(viewModel.showMilitaryBases ? Color.purple.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                                }
+
+                                Button {
+                                    viewModel.showConflictEvents.toggle()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(viewModel.showConflictEvents ? .red : Color.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text("Conflicts")
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(viewModel.showConflictEvents ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                                }
+
+                                Button {
+                                    viewModel.showCyberThreats.toggle()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(viewModel.showCyberThreats ? .red : Color.secondary)
+                                            .frame(width: 8, height: 8)
+                                        Text("Cyber")
+                                            .font(.caption2)
+                                            .lineLimit(1)
+                                    }
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(viewModel.showCyberThreats ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                                }
                             }
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(viewModel.layerVisibility.isVisible(layer) ? layer.tint.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                         }
-                    }
+                        .padding(.horizontal, 14)
 
-                    // New layer toggles
-                    Button {
-                        viewModel.showGPSJamming.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
-                                .frame(width: 8, height: 8)
-                            Text("GPS Jamming")
-                                .font(.caption2)
-                                .lineLimit(1)
+                        HStack {
+                            Button("Enable all", action: viewModel.resetLayerDefaults)
+                            Button("Disable all", action: viewModel.resetLayerState)
+                            Spacer()
+                            Text("\(viewModel.layerVisibility.activeLayers.count) Layers Active")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(viewModel.showGPSJamming ? Color.orange.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
+                        .font(.caption)
+                        .buttonStyle(.bordered)
+                        .padding(.horizontal, 14)
                     }
-
-                    Button {
-                        viewModel.showMilitaryBases.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(viewModel.showMilitaryBases ? .purple : Color.secondary)
-                                .frame(width: 8, height: 8)
-                            Text("Bases")
-                                .font(.caption2)
-                                .lineLimit(1)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(viewModel.showMilitaryBases ? Color.purple.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
-                    }
-
-                    Button {
-                        viewModel.showConflictEvents.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(viewModel.showConflictEvents ? .red : Color.secondary)
-                                .frame(width: 8, height: 8)
-                            Text("Conflicts")
-                                .font(.caption2)
-                                .lineLimit(1)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(viewModel.showConflictEvents ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
-                    }
-
-                    // Cyber Threats Toggle
-                    Button {
-                        viewModel.showCyberThreats.toggle()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(viewModel.showCyberThreats ? .red : Color.secondary)
-                                .frame(width: 8, height: 8)
-                            Text("Cyber")
-                                .font(.caption2)
-                                .lineLimit(1)
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(viewModel.showCyberThreats ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
-                    }
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial)
                 }
             }
-
-            HStack {
-                Button("Enable all", action: viewModel.resetLayerDefaults)
-                Button("Disable all", action: viewModel.resetLayerState)
-            }
-            .font(.caption)
-            .buttonStyle(.bordered)
+            .navigationTitle("Global Map")
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var sidePanelColumn: some View {
@@ -1776,6 +1808,29 @@ struct ContentView: View {
         }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage("appRefreshRate") private var refreshRate: AppRefreshRate = .oneMinute
+    @ObservedObject var viewModel: DashboardViewModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(header: Text("App Preferences"), footer: Text("Adjusting the refresh rate will change how often data is updated in live mode.")) {
+                    Picker("Refresh Rate", selection: $refreshRate) {
+                        ForEach(AppRefreshRate.allCases) { rate in
+                            Text(rate.title).tag(rate)
+                        }
+                    }
+                    .onChange(of: refreshRate) { _, _ in
+                        viewModel.restartTicker()
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+        }
     }
 }
 

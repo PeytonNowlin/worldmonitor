@@ -67,40 +67,55 @@ actor CoinGeckoService {
     /// Fetch stablecoin peg health
     func fetchStablecoinHealth(currency: String = "usd") async throws -> [StablecoinHealth] {
         await rateLimiter.waitForToken()
-        
-        let stablecoins = Stablecoin.allCases
-        let ids = stablecoins.map { $0.rawValue }.joined(separator: ",")
-        
-        let queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "ids", value: ids),
-            URLQueryItem(name: "vs_currency", value: currency)
-        ]
-        
-        var components = URLComponents(
-            url: config.baseURL.appendingPathComponent("/coins/markets"),
-            resolvingAgainstBaseURL: true
-        )
-        components?.queryItems = queryItems
-        
-        guard let url = components?.url else {
-            throw HTTPClientError.invalidURL
-        }
-        
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        
-        let data = try await httpClient.fetchData(url: url, source: .coinGecko)
-        let assets = try decoder.decode([CoinGeckoCoin].self, from: data)
-        
-        return assets.map { coin in
-            StablecoinHealth(
-                id: coin.id,
-                symbol: coin.symbol.uppercased(),
-                name: coin.name,
-                pegCurrency: currency.uppercased(),
-                currentPrice: coin.currentPrice,
-                idealPrice: 1.0
+
+        return try await cache.fetchWithCache(
+            source: .coinGecko,
+            region: "stablecoins_\(currency.lowercased())",
+            maxAge: DataSource.coinGecko.defaultCacheTTL
+        ) {
+            let stablecoins = Stablecoin.allCases
+            let ids = stablecoins.map { $0.rawValue }.joined(separator: ",")
+
+            let queryItems: [URLQueryItem] = [
+                URLQueryItem(name: "ids", value: ids),
+                URLQueryItem(name: "vs_currency", value: currency),
+                URLQueryItem(name: "order", value: "market_cap_desc"),
+                URLQueryItem(name: "per_page", value: "\(stablecoins.count)"),
+                URLQueryItem(name: "page", value: "1"),
+                URLQueryItem(name: "sparkline", value: "false")
+            ]
+
+            var components = URLComponents(
+                url: self.config.baseURL.appendingPathComponent("/coins/markets"),
+                resolvingAgainstBaseURL: true
             )
+            components?.queryItems = queryItems
+
+            guard let url = components?.url else {
+                throw HTTPClientError.invalidURL
+            }
+
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+            let coins: [StablecoinMarketCoin] = try await self.httpClient.fetch(
+                url: url,
+                source: .coinGecko,
+                retries: 3,
+                decoder: decoder
+            )
+
+            return coins.compactMap { coin in
+                guard let currentPrice = coin.currentPrice else { return nil }
+                return StablecoinHealth(
+                    id: coin.id,
+                    symbol: coin.symbol.uppercased(),
+                    name: coin.name,
+                    pegCurrency: currency.uppercased(),
+                    currentPrice: currentPrice,
+                    idealPrice: 1.0
+                )
+            }
         }
     }
     
@@ -202,6 +217,20 @@ struct CoinGeckoCoin: Codable {
     let name: String
     let currentPrice: Double
     
+    enum CodingKeys: String, CodingKey {
+        case id
+        case symbol
+        case name
+        case currentPrice = "current_price"
+    }
+}
+
+private struct StablecoinMarketCoin: Codable {
+    let id: String
+    let symbol: String
+    let name: String
+    let currentPrice: Double?
+
     enum CodingKeys: String, CodingKey {
         case id
         case symbol
