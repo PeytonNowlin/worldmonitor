@@ -688,6 +688,20 @@ struct DashboardCardView: View {
 }
 
 struct ContentView: View {
+    private enum MapSelection: Identifiable {
+        case flight(MilitaryFlightSignal)
+        case vessel(MilitaryVesselSignal)
+
+        var id: String {
+            switch self {
+            case .flight(let flight):
+                return "flight-\(flight.id)"
+            case .vessel(let vessel):
+                return "vessel-\(vessel.id)"
+            }
+        }
+    }
+
     @StateObject private var viewModel: DashboardViewModel
     @State private var mapCameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -696,6 +710,7 @@ struct ContentView: View {
         )
     )
     @State private var selectedTab = 0
+    @State private var selectedMapTarget: MapSelection?
 
     init(viewModel: DashboardViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -731,6 +746,10 @@ struct ContentView: View {
         .onDisappear {
             viewModel.cancelRefreshes()
             viewModel.stopLiveMode()
+        }
+        .sheet(item: $selectedMapTarget) { target in
+            mapTargetDetailSheet(for: target)
+                .presentationDetents([.height(280), .medium])
         }
     }
 
@@ -828,22 +847,32 @@ struct ContentView: View {
                     if viewModel.layerVisibility.isVisible(.conflictZones) {
                         ForEach(viewModel.visibleFlights) { flight in
                             Annotation(flight.callsign, coordinate: flight.coordinate) {
-                                Image(systemName: "airplane.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.red)
-                                    .padding(2)
-                                    .background(.white.opacity(0.7), in: Circle())
+                                Button {
+                                    selectedMapTarget = .flight(flight)
+                                } label: {
+                                    Image(systemName: "airplane.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(.red)
+                                        .padding(2)
+                                        .background(.white.opacity(0.7), in: Circle())
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
                     if viewModel.layerVisibility.isVisible(.maritimeTraffic) {
                         ForEach(viewModel.visibleVessels) { vessel in
                             Annotation(vessel.name, coordinate: vessel.coordinate) {
-                                Image(systemName: "ferry.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.blue)
-                                    .padding(4)
-                                    .background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                Button {
+                                    selectedMapTarget = .vessel(vessel)
+                                } label: {
+                                    Image(systemName: "ferry.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.blue)
+                                        .padding(4)
+                                        .background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -1394,6 +1423,72 @@ struct ContentView: View {
         default:
             return 9
         }
+    }
+
+    @ViewBuilder
+    private func mapTargetDetailSheet(for target: MapSelection) -> some View {
+        switch target {
+        case .flight(let flight):
+            mapEntityDetailCard(
+                title: flight.callsign.isEmpty ? "Unknown Callsign" : flight.callsign,
+                systemImage: "airplane",
+                tint: .red,
+                rows: [
+                    ("ICAO", flight.id.uppercased()),
+                    ("Altitude", "\(Int(flight.altitude.rounded())) m"),
+                    ("Speed", "\(Int(flight.speed.rounded())) m/s"),
+                    ("Last Seen", flight.lastSeenAt.formatted(date: .abbreviated, time: .shortened)),
+                    ("Latitude", String(format: "%.4f", flight.latitude)),
+                    ("Longitude", String(format: "%.4f", flight.longitude))
+                ]
+            )
+        case .vessel(let vessel):
+            mapEntityDetailCard(
+                title: vessel.name,
+                systemImage: "ferry.fill",
+                tint: .blue,
+                rows: [
+                    ("ID", vessel.id),
+                    ("Type", vessel.vesselType.isEmpty ? "Unknown" : vessel.vesselType),
+                    ("Region", vessel.region.isEmpty ? "Unknown" : vessel.region),
+                    ("Latitude", String(format: "%.4f", vessel.latitude)),
+                    ("Longitude", String(format: "%.4f", vessel.longitude))
+                ]
+            )
+        }
+    }
+
+    private func mapEntityDetailCard(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        rows: [(String, String)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+            }
+
+            ForEach(rows, id: \.0) { key, value in
+                HStack {
+                    Text(key)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(value)
+                        .font(.caption)
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
     }
 
     // MARK: - C2 Server Helpers
