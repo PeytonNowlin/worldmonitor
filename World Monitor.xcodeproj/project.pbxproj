@@ -30,9 +30,9 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		7EBBF5D02F553B0500E11A3F /* World Monitor */ = {
+		7EBBF5D02F553B0500E11A3F /* World Monitor App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "World Monitor";
+			path = "World Monitor App";
 			sourceTree = "<group>";
 		};
 		7EBBF5E02F553B0600E11A3F /* World MonitorTests */ = {
@@ -75,7 +75,7 @@
 		7EBBF5C52F553B0500E11A3F = {
 			isa = PBXGroup;
 			children = (
-				7EBBF5D02F553B0500E11A3F /* World Monitor */,
+				7EBBF5D02F553B0500E11A3F /* World Monitor App */,
 				7EBBF5E02F553B0600E11A3F /* World MonitorTests */,
 				7EBBF5EA2F553B0600E11A3F /* World MonitorUITests */,
 				7EBBF5CF2F553B0500E11A3F /* Products */,
@@ -108,7 +108,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				7EBBF5D02F553B0500E11A3F /* World Monitor */,
+				7EBBF5D02F553B0500E11A3F /* World Monitor App */,
 			);
 			name = "World Monitor";
 			packageProductDependencies = (

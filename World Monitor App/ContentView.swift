@@ -89,30 +89,21 @@ final class DashboardViewModel: ObservableObject {
     @Published var headlinesFailed = false
     @Published var naturalEventsFailed = false
     @Published var militaryOverviewFailed = false
-    @Published var gdeltFailed = false
-    @Published var ucdpFailed = false
     @Published var cyberIntelFailed = false
     @Published var marketDataFailed = false
     @Published var travelSafetyFailed = false
 
     // MARK: - Conflict & Security Data
-    @Published var gdeltEvents: [GDELTEvent] = []
-    @Published var ucdpConflicts: [UCDPConflictEvent] = []
-
     // MARK: - Military Data
-    @Published var gpsJammingCells: [GPSJamHexCell] = []
     @Published var militaryBases: [MilitaryBase] = []
 
     // MARK: - Cyber Threat Data
     @Published var c2Servers: [FeodoC2Server] = []
-    @Published var maliciousURLs: [URLhausEntry] = []
-    @Published var c2IntelIndicators: [C2IntelIOC] = []
 
     // MARK: - Market Data
     @Published var marketIndices: [YahooQuote] = []
     @Published var cryptoAssets: [CryptoAsset] = []
     @Published var fearGreed: FearGreedIndex?
-    @Published var stablecoinHealth: [StablecoinHealth] = []
     @Published var policyRates: [BISPolicyRate] = []
     @Published var bitcoinHashrate: BitcoinHashrate?
 
@@ -122,13 +113,10 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Travel & Safety Data
     @Published var travelAdvisories: [TravelAdvisory] = []
-    @Published var airportDelays: [AirportDelay] = []
 
     // MARK: - New Layer Visibility
     @Published var showCyberThreats: Bool = false
-    @Published var showGPSJamming: Bool = false
     @Published var showMilitaryBases: Bool = false
-    @Published var showConflictEvents: Bool = false
 
     private struct CacheKey: Hashable {
         let bucket: String
@@ -185,24 +173,10 @@ final class DashboardViewModel: ObservableObject {
         return visible.sorted { $0.severity > $1.severity }.prefix(maxVisibleEvents).map { $0 }
     }
 
-    var visibleGPSJamCells: [GPSJamHexCell] {
-        guard !gpsJammingCells.isEmpty else { return [] }
-        return gpsJammingCells.filter { cell in
-            visibleMapRegion.contains(cell.coordinate) && cell.interferenceLevel != .low
-        }
-    }
-
     var visibleMilitaryBases: [MilitaryBase] {
         guard !militaryBases.isEmpty else { return [] }
         return militaryBases.filter { base in
             visibleMapRegion.contains(base.coordinate)
-        }
-    }
-
-    var visibleGDELTEvents: [GDELTEvent] {
-        guard !gdeltEvents.isEmpty else { return [] }
-        return gdeltEvents.filter { event in
-            visibleMapRegion.contains(event.coordinate) && event.severity >= 3
         }
     }
 
@@ -251,8 +225,6 @@ final class DashboardViewModel: ObservableObject {
         headlinesFailed = false
         naturalEventsFailed = false
         militaryOverviewFailed = false
-        gdeltFailed = false
-        ucdpFailed = false
         cyberIntelFailed = false
         marketDataFailed = false
         travelSafetyFailed = false
@@ -295,11 +267,11 @@ final class DashboardViewModel: ObservableObject {
         guard !Task.isCancelled, isCurrentVersion(version) else { return }
 
         let coreBuckets = ["snapshot", "headlines", "naturalEvents", "militaryOverview"]
-        let conflictBuckets = ["gdelt", "ucdp", "gpsJam", "militaryBases"]
-        let cyberBuckets = ["c2Servers", "maliciousURLs", "c2Intel"]
-        let marketBuckets = ["marketIndices", "cryptoAssets", "fearGreed", "stablecoins", "policyRates", "bitcoinHashrate"]
+        let conflictBuckets = ["militaryBases"]
+        let cyberBuckets = ["c2Servers"]
+        let marketBuckets = ["marketIndices", "cryptoAssets", "fearGreed", "policyRates", "bitcoinHashrate"]
         let infrastructureBuckets = ["connectivity", "displacement"]
-        let travelBuckets = ["advisories", "airports"]
+        let travelBuckets = ["advisories"]
 
         let shouldRefreshCore = !hasAllSectionCache(buckets: coreBuckets, context: cacheContext, maxAge: Self.coreFreshnessWindow)
         let shouldRefreshConflictSecurity = !hasAllSectionCache(
@@ -341,26 +313,11 @@ final class DashboardViewModel: ObservableObject {
         if let cachedMilitary: MilitaryOverview = readCached(bucket: "militaryOverview", context: cacheContext, maxAge: Self.coreFreshnessWindow) {
             militaryOverview = cachedMilitary
         }
-        if let cachedGDELT: [GDELTEvent] = readCached(bucket: "gdelt", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            gdeltEvents = cachedGDELT
-        }
-        if let cachedUCDP: [UCDPConflictEvent] = readCached(bucket: "ucdp", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            ucdpConflicts = cachedUCDP
-        }
-        if let cachedGPSJam: [GPSJamHexCell] = readCached(bucket: "gpsJam", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            gpsJammingCells = cachedGPSJam
-        }
         if let cachedMilitaryBases: [MilitaryBase] = readCached(bucket: "militaryBases", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             militaryBases = cachedMilitaryBases
         }
         if let cachedC2Servers: [FeodoC2Server] = readCached(bucket: "c2Servers", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             c2Servers = cachedC2Servers
-        }
-        if let cachedMaliciousURLs: [URLhausEntry] = readCached(bucket: "maliciousURLs", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            maliciousURLs = cachedMaliciousURLs
-        }
-        if let cachedC2Intel: [C2IntelIOC] = readCached(bucket: "c2Intel", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            c2IntelIndicators = cachedC2Intel
         }
         if let cachedMarketIndices: [YahooQuote] = readCached(bucket: "marketIndices", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             marketIndices = cachedMarketIndices
@@ -370,9 +327,6 @@ final class DashboardViewModel: ObservableObject {
         }
         if let cachedFearGreed: FearGreedIndex = readCached(bucket: "fearGreed", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             fearGreed = cachedFearGreed
-        }
-        if let cachedStablecoins: [StablecoinHealth] = readCached(bucket: "stablecoins", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            stablecoinHealth = cachedStablecoins
         }
         if let cachedPolicyRates: [BISPolicyRate] = readCached(bucket: "policyRates", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             policyRates = cachedPolicyRates
@@ -388,9 +342,6 @@ final class DashboardViewModel: ObservableObject {
         }
         if let cachedAdvisories: [TravelAdvisory] = readCached(bucket: "advisories", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
             travelAdvisories = cachedAdvisories
-        }
-        if let cachedAirportDelays: [AirportDelay] = readCached(bucket: "airports", context: cacheContext, maxAge: Self.backgroundFreshnessWindow) {
-            airportDelays = cachedAirportDelays
         }
 
         sectionLoadState[.core] = shouldRefreshCore
@@ -472,59 +423,28 @@ final class DashboardViewModel: ObservableObject {
 
         if shouldRefreshConflictSecurity {
             sectionLoadState[.conflictSecurity] = .refreshing
-            async let gdeltTask: [GDELTEvent]? = safeCall { try await self.service.gdeltEvents(for: query) }
-            async let ucdpTask: [UCDPConflictEvent]? = safeCall { try await self.service.ucdpConflicts(for: query) }
-            let fetchedGDELT = await gdeltTask
-            let fetchedUCDP = await ucdpTask
-
-            async let gpsJamTask: [GPSJamHexCell]? = safeCall { try await self.service.gpsJammingData(region: nil) }
             async let basesTask: [MilitaryBase]? = safeCall { await self.service.militaryBases(for: self.selectedRegion) }
-            let fetchedGPSJam = await gpsJamTask
             let fetchedBases = await basesTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
-
-            let newGdeltFailed = fetchedGDELT == nil
-            let newUcdpFailed = fetchedUCDP == nil
 
             // Final guard before mutating state: ensure we're still the current version
             guard isCurrentVersion(version) else { return }
 
-            gdeltFailed = newGdeltFailed
-            ucdpFailed = newUcdpFailed
-            if let fetchedGDELT {
-                gdeltEvents = fetchedGDELT
-                writeCache(bucket: "gdelt", context: cacheContext, value: fetchedGDELT)
-            }
-            if let fetchedUCDP {
-                ucdpConflicts = fetchedUCDP
-                writeCache(bucket: "ucdp", context: cacheContext, value: fetchedUCDP)
-            }
-
-            if let fetchedGPSJam {
-                gpsJammingCells = fetchedGPSJam
-                if !fetchedGPSJam.isEmpty {
-                    writeCache(bucket: "gpsJam", context: cacheContext, value: fetchedGPSJam)
-                }
-            }
             if let fetchedBases {
                 militaryBases = fetchedBases
                 writeCache(bucket: "militaryBases", context: cacheContext, value: fetchedBases)
             }
-            sectionLoadState[.conflictSecurity] = (newGdeltFailed && newUcdpFailed && fetchedGPSJam == nil) ? .failed : .fresh
+            sectionLoadState[.conflictSecurity] = fetchedBases == nil ? .failed : .fresh
         }
 
         if shouldRefreshCyber {
             sectionLoadState[.cyberThreats] = .refreshing
             async let c2Task: [FeodoC2Server]? = safeCall { try await self.service.c2Servers() }
-            async let urlhausTask: [URLhausEntry]? = safeCall { try await self.service.maliciousURLs() }
-            async let c2IntelTask: [C2IntelIOC]? = safeCall { try await self.service.c2Intel() }
 
             let fetchedC2 = await c2Task
-            let fetchedURLhaus = await urlhausTask
-            let fetchedC2Intel = await c2IntelTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
-            let newCyberIntelFailed = fetchedC2 == nil || fetchedURLhaus == nil || fetchedC2Intel == nil
+            let newCyberIntelFailed = fetchedC2 == nil
 
             // Final guard before mutating state: ensure we're still the current version
             guard isCurrentVersion(version) else { return }
@@ -533,14 +453,6 @@ final class DashboardViewModel: ObservableObject {
             if let fetchedC2 {
                 c2Servers = fetchedC2
                 writeCache(bucket: "c2Servers", context: cacheContext, value: fetchedC2)
-            }
-            if let fetchedURLhaus {
-                maliciousURLs = fetchedURLhaus
-                writeCache(bucket: "maliciousURLs", context: cacheContext, value: fetchedURLhaus)
-            }
-            if let fetchedC2Intel {
-                c2IntelIndicators = fetchedC2Intel
-                writeCache(bucket: "c2Intel", context: cacheContext, value: fetchedC2Intel)
             }
             sectionLoadState[.cyberThreats] = newCyberIntelFailed ? .failed : .fresh
         }
@@ -554,9 +466,7 @@ final class DashboardViewModel: ObservableObject {
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
             async let fearGreedTask: FearGreedIndex? = safeCall { try await self.service.fearGreedIndex() }
-            async let stablecoinTask: [StablecoinHealth]? = safeCall { try await self.service.stablecoinHealth() }
             let fetchedFearGreed = await fearGreedTask
-            let fetchedStablecoins = await stablecoinTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
             async let policyRatesTask: [BISPolicyRate]? = safeCall { try await self.service.policyRates() }
@@ -565,14 +475,9 @@ final class DashboardViewModel: ObservableObject {
             let fetchedHashrate = await hashrateTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
-            let newMarketDataFailed = fetchedIndices == nil
-                || fetchedIndices?.isEmpty == true
-                || fetchedCrypto == nil
-                || fetchedCrypto?.isEmpty == true
-                || fetchedStablecoins == nil
-                || fetchedStablecoins?.isEmpty == true
-                || fetchedPolicyRates?.isEmpty == true
-                || fetchedHashrate == nil
+            let hasIndices = !(fetchedIndices?.isEmpty ?? true)
+            let hasCrypto = !(fetchedCrypto?.isEmpty ?? true)
+            let newMarketDataFailed = !hasIndices && !hasCrypto
 
             // Final guard before mutating state: ensure we're still the current version
             guard isCurrentVersion(version) else { return }
@@ -590,10 +495,6 @@ final class DashboardViewModel: ObservableObject {
             if let fetchedFearGreed {
                 fearGreed = fetchedFearGreed
                 writeCache(bucket: "fearGreed", context: cacheContext, value: fetchedFearGreed)
-            }
-            if let fetchedStablecoins {
-                stablecoinHealth = fetchedStablecoins
-                writeCache(bucket: "stablecoins", context: cacheContext, value: fetchedStablecoins)
             }
             if let fetchedPolicyRates {
                 policyRates = fetchedPolicyRates
@@ -628,12 +529,10 @@ final class DashboardViewModel: ObservableObject {
         if shouldRefreshTravelSafety {
             sectionLoadState[.travelSafety] = .refreshing
             async let advisoriesTask: [TravelAdvisory]? = safeCall { try await self.service.travelAdvisories() }
-            async let airportsTask: [AirportDelay]? = safeCall { try await self.service.airportDelays() }
             let fetchedAdvisories = await advisoriesTask
-            let fetchedAirports = await airportsTask
             if !isCurrentVersion(version) || Task.isCancelled { return }
 
-            let newTravelSafetyFailed = fetchedAdvisories == nil || fetchedAirports == nil
+            let newTravelSafetyFailed = fetchedAdvisories == nil || fetchedAdvisories?.isEmpty == true
 
             // Final guard before mutating state: ensure we're still the current version
             guard isCurrentVersion(version) else { return }
@@ -642,10 +541,6 @@ final class DashboardViewModel: ObservableObject {
             if let fetchedAdvisories {
                 travelAdvisories = fetchedAdvisories
                 writeCache(bucket: "advisories", context: cacheContext, value: fetchedAdvisories)
-            }
-            if let fetchedAirports {
-                airportDelays = fetchedAirports
-                writeCache(bucket: "airports", context: cacheContext, value: fetchedAirports)
             }
             sectionLoadState[.travelSafety] = newTravelSafetyFailed ? .failed : .fresh
         }
@@ -933,32 +828,12 @@ struct ContentView: View {
                             }
                         }
                     }
-                    if viewModel.showGPSJamming {
-                        ForEach(viewModel.visibleGPSJamCells) { cell in
-                            Annotation("GPS Jam", coordinate: cell.coordinate) {
-                                Circle()
-                                    .fill(gpsJamColor(for: cell))
-                                    .frame(width: gpsJamSize(for: cell), height: gpsJamSize(for: cell))
-                                    .opacity(0.6)
-                            }
-                        }
-                    }
                     if viewModel.showMilitaryBases {
                         ForEach(viewModel.visibleMilitaryBases) { base in
                             Annotation(base.name, coordinate: base.coordinate) {
                                 Image(systemName: base.type.icon)
                                     .font(.system(size: 16))
                                     .foregroundStyle(.purple)
-                                    .background(.white.opacity(0.8), in: Circle())
-                            }
-                        }
-                    }
-                    if viewModel.showConflictEvents {
-                        ForEach(viewModel.visibleGDELTEvents) { event in
-                            Annotation(event.title, coordinate: event.coordinate) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(.red)
                                     .background(.white.opacity(0.8), in: Circle())
                             }
                         }
@@ -986,7 +861,7 @@ struct ContentView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .lineLimit(2)
-                        Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels | \(viewModel.visibleGPSJamCells.count) jamming | \(viewModel.visibleMilitaryBases.count) bases | \(viewModel.visibleGDELTEvents.count) conflicts | \(viewModel.visibleC2Servers.count) C2s")
+                        Text("\(viewModel.visibleNaturalEvents.count)/\(viewModel.naturalEvents.count) natural | \(viewModel.visibleFlights.count)/\(viewModel.militaryOverview.flights.count) flights | \(viewModel.visibleVessels.count)/\(viewModel.militaryOverview.vessels.count) vessels | \(viewModel.visibleMilitaryBases.count) bases | \(viewModel.visibleC2Servers.count) C2s")
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.85))
                     }
@@ -1019,23 +894,6 @@ struct ContentView: View {
                                 }
 
                                 Button {
-                                    viewModel.showGPSJamming.toggle()
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Circle()
-                                            .fill(viewModel.showGPSJamming ? .orange : Color.secondary)
-                                            .frame(width: 8, height: 8)
-                                        Text("GPS Jamming")
-                                            .font(.caption2)
-                                            .lineLimit(1)
-                                    }
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(viewModel.showGPSJamming ? Color.orange.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
-                                }
-
-                                Button {
                                     viewModel.showMilitaryBases.toggle()
                                 } label: {
                                     HStack(spacing: 6) {
@@ -1050,23 +908,6 @@ struct ContentView: View {
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
                                     .background(viewModel.showMilitaryBases ? Color.purple.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
-                                }
-
-                                Button {
-                                    viewModel.showConflictEvents.toggle()
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Circle()
-                                            .fill(viewModel.showConflictEvents ? .red : Color.secondary)
-                                            .frame(width: 8, height: 8)
-                                        Text("Conflicts")
-                                            .font(.caption2)
-                                            .lineLimit(1)
-                                    }
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(viewModel.showConflictEvents ? Color.red.opacity(0.15) : Color(.secondarySystemBackground), in: Capsule())
                                 }
 
                                 Button {
@@ -1130,7 +971,6 @@ struct ContentView: View {
 
             // New panels
             marketDataPanel
-            conflictSecurityPanel
             cyberThreatPanel
             travelSafetyPanel
         }
@@ -1152,26 +992,34 @@ struct ContentView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                ForEach(DashboardSection.allCases, id: \.self) { section in
-                    if let state = viewModel.sectionLoadState[section],
-                       state == .stale || state == .refreshing || state == .failed {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(state.color)
-                                .frame(width: 6, height: 6)
-                            Text(section.title)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(DashboardSection.allCases, id: \.self) { section in
+                        if let state = viewModel.sectionLoadState[section],
+                           state == .stale || state == .refreshing || state == .failed {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(state.color)
+                                    .frame(width: 6, height: 6)
+                                
+                                Text(section.title)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(state.color)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(state.color.opacity(0.15), in: Capsule())
+                            .overlay(
+                                Capsule().stroke(state.color.opacity(0.3), lineWidth: 0.5)
+                            )
                         }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
                 }
             }
 
-            let anyError = viewModel.hasError || viewModel.gdeltFailed || viewModel.ucdpFailed || viewModel.cyberIntelFailed || viewModel.marketDataFailed || viewModel.travelSafetyFailed
+            let anyError = viewModel.hasError || viewModel.cyberIntelFailed || viewModel.marketDataFailed || viewModel.travelSafetyFailed
             if anyError {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Live data partially unavailable.")
@@ -1200,16 +1048,6 @@ struct ContentView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
                             }
-                            if viewModel.gdeltFailed {
-                                Label("GDELT", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            }
-                            if viewModel.ucdpFailed {
-                                Label("UCDP", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            }
                             if viewModel.cyberIntelFailed {
                                 Label("Cyber", systemImage: "exclamationmark.triangle.fill")
                                     .font(.caption2)
@@ -1235,9 +1073,14 @@ struct ContentView: View {
                     ForEach(viewModel.snapshot.findings, id: \.self) { finding in
                         Text(finding)
                             .font(.caption.weight(.medium))
-                            .padding(.horizontal, 10)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(Color(.secondarySystemBackground), in: Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                            )
                     }
                 }
             }
@@ -1290,35 +1133,6 @@ struct ContentView: View {
                         Text(String(format: "%+.1f%%", asset.priceChangePercentage24h))
                             .font(.caption2)
                             .foregroundStyle(asset.isPositive ? .green : .red)
-                    }
-                }
-            }
-
-            Divider()
-
-            // Stablecoin Health
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Stablecoin Peg Health")
-                    .font(.caption.weight(.semibold))
-
-                if viewModel.stablecoinHealth.isEmpty {
-                    Text("Stablecoin data pending")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.stablecoinHealth) { coin in
-                        HStack {
-                            Circle()
-                                .fill(stablecoinColor(coin.status))
-                                .frame(width: 8, height: 8)
-                            Text("\(coin.symbol) · \(coin.name)")
-                                .font(.caption2.weight(.medium))
-                                .lineLimit(1)
-                            Spacer()
-                            Text(String(format: "%.2f%%", coin.deviation))
-                                .font(.caption2)
-                                .foregroundStyle(stablecoinColor(coin.status))
-                        }
                     }
                 }
             }
@@ -1387,71 +1201,6 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private var conflictSecurityPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Conflict Monitor")
-                    .font(.headline)
-                Spacer()
-                Text("\(viewModel.ucdpConflicts.count) active")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            // UCDP War Zones
-            if !viewModel.ucdpConflicts.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(viewModel.ucdpConflicts.prefix(3)) { conflict in
-                        HStack {
-                            Circle()
-                                .fill(conflict.severity >= 4 ? .red : .orange)
-                                .frame(width: 8, height: 8)
-                            Text(conflict.conflictName)
-                                .font(.caption)
-                                .lineLimit(1)
-                            Spacer()
-                            Text("\(conflict.deaths) deaths")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            } else if !viewModel.ucdpFailed {
-                Label("No active critical conflicts", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-
-            Divider()
-
-            // GDELT Recent Events
-            if !viewModel.gdeltEvents.isEmpty {
-                Text("Recent Activity")
-                    .font(.caption.weight(.semibold))
-                ForEach(viewModel.gdeltEvents.prefix(2)) { event in
-                    HStack {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(event.severity >= 4 ? .red : .orange)
-                        Text(event.title)
-                            .font(.caption)
-                            .lineLimit(1)
-                        Spacer()
-                        Text("\(event.numMentions) mentions")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else if !viewModel.gdeltFailed {
-                Label("No recent high-severity events", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-        }
-        .padding(14)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
     private var cyberThreatPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -1470,12 +1219,6 @@ struct ContentView: View {
                     count: viewModel.c2Servers.count,
                     label: "C2 Servers",
                     color: .red
-                )
-                ThreatStatBadge(
-                    icon: "link.badge.plus",
-                    count: viewModel.maliciousURLs.count,
-                    label: "Malicious URLs",
-                    color: .orange
                 )
             }
 
@@ -1524,25 +1267,6 @@ struct ContentView: View {
                         .foregroundStyle(.red)
                 }
             }
-
-            // Airport Status
-            let delays = viewModel.airportDelays.filter { $0.hasSignificantDelay }
-            if !delays.isEmpty {
-                HStack {
-                    Image(systemName: "airplane")
-                        .font(.caption)
-                    Text("\(delays.count) airports with delays")
-                        .font(.caption)
-                    Spacer()
-                }
-                .foregroundStyle(.orange)
-            } else if !viewModel.travelSafetyFailed {
-                Label("No significant delays currently reported.", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
-            }
-
-            Divider()
 
             // Do Not Travel Countries
             let doNotTravel = viewModel.travelAdvisories.filter { $0.advisoryLevel == .level4 }
@@ -1620,17 +1344,6 @@ struct ContentView: View {
         }
     }
 
-    private func stablecoinColor(_ status: StablecoinHealth.StablecoinStatus) -> Color {
-        switch status {
-        case .onPeg:
-            return .green
-        case .slightDepeg:
-            return .yellow
-        case .depegged:
-            return .red
-        }
-    }
-
     private func hashrateColor(_ change: Double) -> Color {
         if change >= 0 {
             return .green
@@ -1662,23 +1375,6 @@ struct ContentView: View {
         default:
             return 9
         }
-    }
-
-    // MARK: - GPS Jamming Helpers
-    private func gpsJamColor(for cell: GPSJamHexCell) -> Color {
-        switch cell.interferenceLevel {
-        case .high:
-            return .red
-        case .medium:
-            return .orange
-        case .low:
-            return .clear
-        }
-    }
-
-    private func gpsJamSize(for cell: GPSJamHexCell) -> CGFloat {
-        // Scale by interference percentage (20-40pt range)
-        return 20 + CGFloat(cell.interferencePercent / 5)
     }
 
     // MARK: - C2 Server Helpers
@@ -1813,12 +1509,19 @@ struct ContentView: View {
 
 struct SettingsView: View {
     @AppStorage("appRefreshRate") private var refreshRate: AppRefreshRate = .oneMinute
+    @AppStorage("appTheme") private var appTheme: AppTheme = .dark
     @ObservedObject var viewModel: DashboardViewModel
 
     var body: some View {
         NavigationStack {
             Form {
                 Section(header: Text("App Preferences"), footer: Text("Adjusting the refresh rate will change how often data is updated in live mode.")) {
+                    Picker("Theme", selection: $appTheme) {
+                        ForEach(AppTheme.allCases) { theme in
+                            Text(theme.rawValue).tag(theme)
+                        }
+                    }
+
                     Picker("Refresh Rate", selection: $refreshRate) {
                         ForEach(AppRefreshRate.allCases) { rate in
                             Text(rate.title).tag(rate)

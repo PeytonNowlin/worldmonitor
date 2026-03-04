@@ -14,12 +14,7 @@ protocol WorldMonitorService {
     func naturalEvents(for query: FeedQuery) async throws -> [NaturalEvent]
     func militaryOverview(for query: FeedQuery) async throws -> MilitaryOverview
     
-    // MARK: - Conflict & Security
-    func gdeltEvents(for query: FeedQuery) async throws -> [GDELTEvent]
-    func ucdpConflicts(for query: FeedQuery) async throws -> [UCDPConflictEvent]
-    
     // MARK: - Military Data
-    func gpsJammingData(region: GPSJamRegion?) async throws -> [GPSJamHexCell]
     func militaryBases(for region: RegionPreset) async -> [MilitaryBase]
     
     // MARK: - Cyber Threat Intelligence
@@ -739,23 +734,6 @@ struct LiveWorldMonitorService: WorldMonitorService {
     
     // MARK: - WorldMonitorService Protocol Extensions (New Endpoints)
     
-    func gdeltEvents(for query: FeedQuery) async throws -> [GDELTEvent] {
-        return try await GDELTService.shared.fetchRecentSignificantEvents(
-            days: Int(query.window.interval / 86400),
-            region: query.region == .global ? nil : query.region
-        )
-    }
-    
-    func ucdpConflicts(for query: FeedQuery) async throws -> [UCDPConflictEvent] {
-        return try await UCDPService.shared.fetchActiveConflicts(
-            region: query.region == .global ? nil : query.region
-        )
-    }
-    
-    func gpsJammingData(region: GPSJamRegion?) async throws -> [GPSJamHexCell] {
-        return try await GPSJamService.shared.fetchJammingData(region: region)
-    }
-    
     func militaryBases(for region: RegionPreset) async -> [MilitaryBase] {
         return await MilitaryBasesService.shared.fetchBasesInRegion(region)
     }
@@ -765,11 +743,13 @@ struct LiveWorldMonitorService: WorldMonitorService {
     }
     
     func maliciousURLs() async throws -> [URLhausEntry] {
-        return try await URLhausService.shared.fetchActiveURLs(limit: 100)
+        // URLhaus endpoint is no longer usable without credentials in current flow.
+        return []
     }
     
     func c2Intel() async throws -> [C2IntelIOC] {
-        return try await C2IntelService.shared.fetchHighConfidenceIOC()
+        // Legacy GitHub feed URLs are defunct (404), so disable this provider.
+        return []
     }
     
     func marketQuotes(indices: [MarketIndex]) async throws -> [YahooQuote] {
@@ -809,7 +789,8 @@ struct LiveWorldMonitorService: WorldMonitorService {
     }
     
     func airportDelays() async throws -> [AirportDelay] {
-        return try await FAAAirportService.shared.fetchMajorAirportStatus()
+        // FAA airport status endpoint is currently unavailable.
+        return []
     }
 }
 

@@ -114,9 +114,14 @@ enum DataSource: String, CaseIterable, Identifiable {
         }
     }
     
-    /// Whether this source requires an API key (all current sources are no-key)
+    /// Whether this source requires credentials
     var requiresAPIKey: Bool {
-        return false
+        switch self {
+        case .ucdp:
+            return true
+        default:
+            return false
+        }
     }
 }
 

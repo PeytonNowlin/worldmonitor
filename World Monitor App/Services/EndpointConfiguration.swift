@@ -60,7 +60,7 @@ enum EndpointConfigurations {
     
     static var ucdp: EndpointConfiguration {
         EndpointConfiguration(
-            baseURL: URL(string: "https://ucdpapi.pcr.uu.se/api")!,
+            baseURL: URL(string: "https://ucdpapi.pcr.uu.se")!,
             timeout: 30,
             retryPolicy: .default
         )

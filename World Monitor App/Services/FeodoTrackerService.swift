@@ -34,6 +34,7 @@ actor FeodoTrackerService {
                 // Try multiple date formats
                 let formatters = [
                     "yyyy-MM-dd HH:mm:ss",
+                    "yyyy-MM-dd HH:mm:ss zzz",
                     "yyyy-MM-dd'T'HH:mm:ss",
                     "yyyy-MM-dd"
                 ].map { format -> DateFormatter in

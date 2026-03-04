@@ -6,7 +6,6 @@ enum MonitorVariant: String, CaseIterable, Identifiable, Codable {
     case world
     case tech
     case finance
-    case happy
 
     var id: String { rawValue }
 
@@ -15,7 +14,6 @@ enum MonitorVariant: String, CaseIterable, Identifiable, Codable {
         case .world: "World"
         case .tech: "Tech"
         case .finance: "Finance"
-        case .happy: "Happy"
         }
     }
 }

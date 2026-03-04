@@ -11,7 +11,7 @@ actor UCDPService {
     private let config = EndpointConfigurations.ucdp
     
     // Track discovered API version
-    private var discoveredVersion: String = "23.1"
+    private var discoveredVersion: String = "25.1"
     private var lastVersionCheck: Date?
     private let versionCacheTTL: TimeInterval = 3600 // 1 hour
     
@@ -60,7 +60,14 @@ actor UCDPService {
             )
             
             // Filter active conflicts (no end date or end date in future)
-            return response.result.filter { $0.isActive }
+            let activeConflicts = response.result.filter { $0.isActive }
+
+            // Apply region filtering when requested.
+            if let region {
+                return self.filterByRegion(conflicts: activeConflicts, region: region)
+            }
+
+            return activeConflicts
         }
     }
     
@@ -156,7 +163,7 @@ actor UCDPService {
         }
         
         // Try common versions in order
-        let versionsToTry = ["23.1", "23.0", "22.1", "22.0", "21.1"]
+        let versionsToTry = ["25.1", "24.1", "23.1", "23.0", "22.1", "22.0", "21.1"]
         
         for version in versionsToTry {
             if await testVersion(version) {
@@ -167,7 +174,7 @@ actor UCDPService {
         }
         
         // Fall back to default if all fail
-        discoveredVersion = "23.1"
+        discoveredVersion = "25.1"
         lastVersionCheck = Date()
     }
     

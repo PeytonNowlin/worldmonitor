@@ -118,7 +118,7 @@ class HTTPClient {
         
         for attempt in 0..<retries {
             do {
-                let result: T = try await performRequest(url: url, decoder: decoderToUse)
+                let result: T = try await performRequest(url: url, source: source, decoder: decoderToUse)
                 await circuitBreaker.recordSuccess()
                 return result
             } catch let error as HTTPClientError {
@@ -202,8 +202,12 @@ class HTTPClient {
     
     // MARK: - Private Methods
     
-    private func performRequest<T: Decodable>(url: URL, decoder: JSONDecoder) async throws -> T {
-        let data = try await fetchData(url: url, source: .usgs) // Source doesn't matter here
+    private func performRequest<T: Decodable>(
+        url: URL,
+        source: DataSource,
+        decoder: JSONDecoder
+    ) async throws -> T {
+        let data = try await fetchData(url: url, source: source)
         
         do {
             return try decoder.decode(T.self, from: data)

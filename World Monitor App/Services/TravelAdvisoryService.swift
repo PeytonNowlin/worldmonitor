@@ -18,8 +18,9 @@ actor TravelAdvisoryService {
             source: .usTravelAdvisory,
             maxAge: DataSource.usTravelAdvisory.defaultCacheTTL
         ) {
-            // State Department advisories JSON
-            let url = URL(string: "https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories.json")!
+            // State Department advisories page. The legacy JSON endpoint is currently
+            // guarded by anti-bot content; this HTML page remains publicly accessible.
+            let url = URL(string: "https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories.html")!
             
             let data = try await self.httpClient.fetchData(url: url, source: .usTravelAdvisory)
             
@@ -89,6 +90,7 @@ actor TravelAdvisoryService {
     // MARK: - Private Methods
     
     private func parseAdvisories(_ data: Data) -> [TravelAdvisory] {
+        // Prefer JSON if available, keep parser for backward compatibility.
         do {
             if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
                 return json.compactMap { item -> TravelAdvisory? in
@@ -115,10 +117,152 @@ actor TravelAdvisoryService {
                 }
             }
         } catch {
-            // Return empty on parse error
-            return []
+            // Fall through to HTML parsing.
         }
-        
-        return []
+
+        return parseAdvisoriesFromHTML(data)
+    }
+
+    private func parseAdvisoriesFromHTML(_ data: Data) -> [TravelAdvisory] {
+        guard let html = String(data: data, encoding: .utf8) else { return [] }
+
+        guard let rowRegex = try? NSRegularExpression(
+            pattern: #"<tr[^>]*>(.*?)</tr>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        ) else { return [] }
+
+        let nsHTML = html as NSString
+        let rowMatches = rowRegex.matches(in: html, options: [], range: NSRange(location: 0, length: nsHTML.length))
+        guard !rowMatches.isEmpty else { return [] }
+
+        let countryRegex = try? NSRegularExpression(
+            pattern: #"<th[^>]*>\s*<a[^>]*>(.*?)</a>\s*</th>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        )
+        let levelRegex = try? NSRegularExpression(
+            pattern: #"level-badge-(\d)"#,
+            options: [.caseInsensitive]
+        )
+        let dateRegex = try? NSRegularExpression(
+            pattern: #"<td>\s*<p>\s*(\d{2}/\d{2}/\d{4})\s*</p>\s*</td>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        )
+        let pillRegex = try? NSRegularExpression(
+            pattern: #"<span[^>]*tsg-utility-risk-pill[^>]*>(.*?)</span>"#,
+            options: [.dotMatchesLineSeparators, .caseInsensitive]
+        )
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MM/dd/yyyy"
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        let locale = Locale(identifier: "en_US_POSIX")
+
+        return rowMatches.compactMap { match in
+            guard match.numberOfRanges >= 2 else { return nil }
+            let rowHTML = nsHTML.substring(with: match.range(at: 1))
+            let nsRow = rowHTML as NSString
+            let rowRange = NSRange(location: 0, length: nsRow.length)
+
+            guard let countryRegex,
+                  let countryMatch = countryRegex.firstMatch(in: rowHTML, options: [], range: rowRange),
+                  countryMatch.numberOfRanges >= 2 else {
+                return nil
+            }
+            let countryName = cleanHTML(nsRow.substring(with: countryMatch.range(at: 1)))
+            guard !countryName.isEmpty else { return nil }
+
+            guard let levelRegex,
+                  let levelMatch = levelRegex.firstMatch(in: rowHTML, options: [], range: rowRange),
+                  levelMatch.numberOfRanges >= 2 else {
+                return nil
+            }
+            let levelString = nsRow.substring(with: levelMatch.range(at: 1))
+
+            guard let dateRegex,
+                  let dateMatch = dateRegex.firstMatch(in: rowHTML, options: [], range: rowRange),
+                  dateMatch.numberOfRanges >= 2 else {
+                return nil
+            }
+            let dateString = cleanHTML(nsRow.substring(with: dateMatch.range(at: 1)))
+
+            guard let levelInt = Int(levelString),
+                  let level = TravelAdvisory.AdvisoryLevel(rawValue: levelInt) else {
+                return nil
+            }
+
+            var warnings: [String] = []
+            if let pillRegex {
+                let warningMatches = pillRegex.matches(
+                    in: rowHTML,
+                    options: [],
+                    range: rowRange
+                )
+                warnings = warningMatches.compactMap { warningMatch in
+                    guard warningMatch.numberOfRanges >= 2 else { return nil }
+                    let warning = cleanHTML(nsRow.substring(with: warningMatch.range(at: 1)))
+                    return warning.isEmpty ? nil : warning
+                }
+            }
+
+            let normalizedName = countryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedName.isEmpty else { return nil }
+
+            let parsedDate = dateFormatter.date(from: dateString) ?? Date()
+            let countryCode = resolveCountryCode(for: normalizedName, locale: locale)
+            return TravelAdvisory(
+                countryName: normalizedName,
+                countryCode: countryCode,
+                advisoryLevel: level,
+                advisoryText: level.description,
+                lastUpdated: parsedDate,
+                specificWarnings: warnings,
+                restrictedAreas: nil
+            )
+        }
+    }
+
+    private func cleanHTML(_ value: String) -> String {
+        var cleaned = value
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+        cleaned = cleaned.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveCountryCode(for countryName: String, locale: Locale) -> String {
+        let overrides: [String: String] = [
+            "Burma": "MM",
+            "Cabo Verde": "CV",
+            "Congo, Democratic Republic of the": "CD",
+            "Congo, Republic of the": "CG",
+            "Cote d'Ivoire": "CI",
+            "Korea, North": "KP",
+            "Korea, South": "KR",
+            "Russia": "RU",
+            "Syria": "SY",
+            "Venezuela": "VE"
+        ]
+        if let override = overrides[countryName] {
+            return override
+        }
+
+        let normalizedTarget = normalize(countryName)
+        for region in Locale.Region.isoRegions {
+            let code = region.identifier
+            guard let localizedName = locale.localizedString(forRegionCode: code) else { continue }
+            if normalize(localizedName) == normalizedTarget {
+                return code
+            }
+        }
+
+        let fallback = countryName.prefix(3).uppercased()
+        return fallback.isEmpty ? "UNK" : String(fallback)
+    }
+
+    private func normalize(_ name: String) -> String {
+        let folded = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        return folded.replacingOccurrences(of: "[^a-z0-9]", with: "", options: .regularExpression)
     }
 }

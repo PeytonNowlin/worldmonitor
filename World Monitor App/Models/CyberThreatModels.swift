@@ -90,17 +90,114 @@ struct FeodoC2Server: ThreatIOC, Codable {
     
     enum CodingKeys: String, CodingKey {
         case ipAddress = "ip_address"
+        case alternateIPAddress = "dst_ip"
+        case fallbackIPAddress = "ip"
         case port
-        case threatType = "tag"
+        case alternatePort = "dst_port"
+        case threatTag = "tag"
         case malwareFamily = "malware"
+        case alternateMalwareFamily = "malware_family"
         case firstSeen = "first_seen"
+        case alternateFirstSeen = "first_seen_utc"
         case lastSeen = "last_seen"
+        case alternateLastSeen = "last_online"
         case countryCode = "countrycode"
+        case alternateCountryCode = "country_code"
         case asn
         case hostName = "hostname"
+        case alternateHostName = "host"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let ip = try container.decodeIfPresent(String.self, forKey: .ipAddress), !ip.isEmpty {
+            ipAddress = ip
+        } else if let ip = try container.decodeIfPresent(String.self, forKey: .alternateIPAddress), !ip.isEmpty {
+            ipAddress = ip
+        } else {
+            ipAddress = try container.decode(String.self, forKey: .fallbackIPAddress)
+        }
+
+        if let intPort = try container.decodeIfPresent(Int.self, forKey: .port) {
+            port = intPort
+        } else if let stringPort = try container.decodeIfPresent(String.self, forKey: .port), let intPort = Int(stringPort) {
+            port = intPort
+        } else if let intPort = try container.decodeIfPresent(Int.self, forKey: .alternatePort) {
+            port = intPort
+        } else if let stringPort = try container.decodeIfPresent(String.self, forKey: .alternatePort), let intPort = Int(stringPort) {
+            port = intPort
+        } else {
+            port = 0
+        }
+
+        let tag = (try container.decodeIfPresent(String.self, forKey: .threatTag) ?? "").lowercased()
+        threatType = FeodoC2Server.mapThreatType(tag: tag)
+
+        if let malware = try container.decodeIfPresent(String.self, forKey: .malwareFamily), !malware.isEmpty {
+            malwareFamily = malware
+        } else {
+            malwareFamily = try container.decodeIfPresent(String.self, forKey: .alternateMalwareFamily) ?? "unknown"
+        }
+
+        if let first = try container.decodeIfPresent(Date.self, forKey: .firstSeen) {
+            firstSeen = first
+        } else {
+            firstSeen = try container.decodeIfPresent(Date.self, forKey: .alternateFirstSeen) ?? .distantPast
+        }
+
+        if let last = try container.decodeIfPresent(Date.self, forKey: .lastSeen) {
+            lastSeen = last
+        } else {
+            lastSeen = try container.decodeIfPresent(Date.self, forKey: .alternateLastSeen) ?? firstSeen
+        }
+
+        if let cc = try container.decodeIfPresent(String.self, forKey: .countryCode), !cc.isEmpty {
+            countryCode = cc
+        } else {
+            countryCode = try container.decodeIfPresent(String.self, forKey: .alternateCountryCode)
+        }
+
+        asn = try container.decodeIfPresent(String.self, forKey: .asn)
+
+        if let host = try container.decodeIfPresent(String.self, forKey: .hostName), !host.isEmpty {
+            hostName = host
+        } else {
+            hostName = try container.decodeIfPresent(String.self, forKey: .alternateHostName)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ipAddress, forKey: .ipAddress)
+        try container.encode(port, forKey: .port)
+        try container.encode(threatType.rawValue, forKey: .threatTag)
+        try container.encode(malwareFamily, forKey: .malwareFamily)
+        try container.encode(firstSeen, forKey: .firstSeen)
+        try container.encode(lastSeen, forKey: .lastSeen)
+        try container.encodeIfPresent(countryCode, forKey: .countryCode)
+        try container.encodeIfPresent(asn, forKey: .asn)
+        try container.encodeIfPresent(hostName, forKey: .hostName)
     }
     
     var id: String { ipAddress }
+
+    private static func mapThreatType(tag: String) -> ThreatType {
+        switch tag {
+        case "darkcomet":
+            return .darkComet
+        case "heodo":
+            return .heodo
+        case "dridex":
+            return .dridex
+        case "trickbot":
+            return .trickbot
+        case "emotet":
+            return .emotet
+        default:
+            return .c2Server
+        }
+    }
 }
 
 struct FeodoTrackerResponse: Codable {
