@@ -128,8 +128,9 @@ struct LiveWorldMonitorService: WorldMonitorService {
     func headlines(for query: FeedQuery) async throws -> [FeedItem] {
         let events = filteredEvents(for: query.region, in: try await loadAllEvents())
             .sorted { $0.occurredAt > $1.occurredAt }
+        let selected = selectBalancedHeadlineEvents(from: events, limit: 12)
 
-        return Array(events.prefix(12)).map { event in
+        return selected.map { event in
             FeedItem(
                 id: event.id,
                 title: event.title,
@@ -139,6 +140,61 @@ struct LiveWorldMonitorService: WorldMonitorService {
                 publishedAt: event.occurredAt
             )
         }
+    }
+
+    private func selectBalancedHeadlineEvents(from events: [NaturalEvent], limit: Int) -> [NaturalEvent] {
+        guard events.count > limit else { return events }
+
+        // Group by category and interleave to prevent one high-volume source (e.g. USGS quakes)
+        // from occupying every headline slot.
+        let groupedByCategory = Dictionary(grouping: events, by: \.category)
+        var queues: [NaturalEvent.Category: [NaturalEvent]] = groupedByCategory.mapValues {
+            $0.sorted { $0.occurredAt > $1.occurredAt }
+        }
+        var categoryOrder = queues.keys.sorted {
+            let lhsDate = queues[$0]?.first?.occurredAt ?? .distantPast
+            let rhsDate = queues[$1]?.first?.occurredAt ?? .distantPast
+            return lhsDate > rhsDate
+        }
+
+        var selection: [NaturalEvent] = []
+        var usedIDs = Set<String>()
+
+        while selection.count < limit && !categoryOrder.isEmpty {
+            var nextOrder: [NaturalEvent.Category] = []
+            for category in categoryOrder {
+                guard var queue = queues[category], !queue.isEmpty else {
+                    continue
+                }
+
+                let candidate = queue.removeFirst()
+                queues[category] = queue
+
+                if !usedIDs.contains(candidate.id) {
+                    selection.append(candidate)
+                    usedIDs.insert(candidate.id)
+                    if selection.count == limit {
+                        break
+                    }
+                }
+
+                if !queue.isEmpty {
+                    nextOrder.append(category)
+                }
+            }
+            categoryOrder = nextOrder
+        }
+
+        if selection.count < limit {
+            for event in events where !usedIDs.contains(event.id) {
+                selection.append(event)
+                if selection.count == limit {
+                    break
+                }
+            }
+        }
+
+        return selection
     }
 
     func naturalEvents(for query: FeedQuery) async throws -> [NaturalEvent] {
@@ -311,15 +367,17 @@ struct LiveWorldMonitorService: WorldMonitorService {
             guard let category = event.categories.first else { return nil }
             guard category.id != "earthquakes" else { return nil }
             guard let latestGeometry = event.geometry.last else { return nil }
-            guard latestGeometry.type == "Point", latestGeometry.coordinates.count >= 2 else { return nil }
+            guard latestGeometry.type == "Point",
+                  let coordinates = latestGeometry.coordinates,
+                  coordinates.count >= 2 else { return nil }
 
             let occurredAt = ISO8601DateFormatter().date(from: latestGeometry.date) ?? now
             if category.id == "wildfires", now.timeIntervalSince(occurredAt) > 48 * 60 * 60 {
                 return nil
             }
 
-            let lon = latestGeometry.coordinates[0]
-            let lat = latestGeometry.coordinates[1]
+            let lon = coordinates[0]
+            let lat = coordinates[1]
             return NaturalEvent(
                 id: event.id,
                 title: event.title,
@@ -794,7 +852,29 @@ private struct EONETCategory: Decodable {
 private struct EONETGeometry: Decodable {
     let date: String
     let type: String
-    let coordinates: [Double]
+    let coordinates: [Double]?
+
+    private enum CodingKeys: String, CodingKey {
+        case date
+        case type
+        case coordinates
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.date = try container.decode(String.self, forKey: .date)
+        self.type = try container.decode(String.self, forKey: .type)
+
+        if let point = try? container.decode([Double].self, forKey: .coordinates) {
+            self.coordinates = point
+        } else if let line = try? container.decode([[Double]].self, forKey: .coordinates) {
+            self.coordinates = line.first
+        } else if let polygon = try? container.decode([[[Double]]].self, forKey: .coordinates) {
+            self.coordinates = polygon.first?.first
+        } else {
+            self.coordinates = nil
+        }
+    }
 }
 
 private struct GDACSResponse: Decodable {
